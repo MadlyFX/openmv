@@ -53,8 +53,14 @@ typedef union {
 #define LSM_FUNC(f)                lsm6ds3tr_c_##f
 #define LSM_CONST(c)               LSM6DS3TR_C_##c
 
+#define lsm_from_fs2_to_mg         lsm6ds3tr_c_from_fs2g_to_mg
+#define lsm_from_fs4_to_mg         lsm6ds3tr_c_from_fs4g_to_mg
 #define lsm_from_fs8_to_mg         lsm6ds3tr_c_from_fs8g_to_mg
-#define lsm_from_fs8_to_mg         lsm6ds3tr_c_from_fs8g_to_mg
+#define lsm_from_fs16_to_mg        lsm6ds3tr_c_from_fs16g_to_mg
+#define lsm_from_fs125_to_mdps     lsm6ds3tr_c_from_fs125dps_to_mdps
+#define lsm_from_fs250_to_mdps     lsm6ds3tr_c_from_fs250dps_to_mdps
+#define lsm_from_fs500_to_mdps     lsm6ds3tr_c_from_fs500dps_to_mdps
+#define lsm_from_fs1000_to_mdps    lsm6ds3tr_c_from_fs1000dps_to_mdps
 #define lsm_from_fs2000_to_mdps    lsm6ds3tr_c_from_fs2000dps_to_mdps
 #define lsm_from_lsb_to_celsius    lsm6ds3tr_c_from_lsb_to_celsius
 
@@ -74,8 +80,14 @@ typedef union {
 #define LSM_FUNC(f)                lsm6dsm_##f
 #define LSM_CONST(c)               LSM6DSM_##c
 
+#define lsm_from_fs2_to_mg         lsm6dsm_from_fs2g_to_mg
+#define lsm_from_fs4_to_mg         lsm6dsm_from_fs4g_to_mg
 #define lsm_from_fs8_to_mg         lsm6dsm_from_fs8g_to_mg
-#define lsm_from_fs8_to_mg         lsm6dsm_from_fs8g_to_mg
+#define lsm_from_fs16_to_mg        lsm6dsm_from_fs16g_to_mg
+#define lsm_from_fs125_to_mdps     lsm6dsm_from_fs125dps_to_mdps
+#define lsm_from_fs250_to_mdps     lsm6dsm_from_fs250dps_to_mdps
+#define lsm_from_fs500_to_mdps     lsm6dsm_from_fs500dps_to_mdps
+#define lsm_from_fs1000_to_mdps    lsm6dsm_from_fs1000dps_to_mdps
 #define lsm_from_fs2000_to_mdps    lsm6dsm_from_fs2000dps_to_mdps
 #define lsm_from_lsb_to_celsius    lsm6dsm_from_lsb_to_celsius
 
@@ -95,8 +107,14 @@ typedef union {
 #define LSM_FUNC(f)                lsm6dsox_##f
 #define LSM_CONST(c)               LSM6DSOX_##c
 
+#define lsm_from_fs2_to_mg         lsm6dsox_from_fs2_to_mg
+#define lsm_from_fs4_to_mg         lsm6dsox_from_fs4_to_mg
 #define lsm_from_fs8_to_mg         lsm6dsox_from_fs8_to_mg
-#define lsm_from_fs8_to_mg         lsm6dsox_from_fs8_to_mg
+#define lsm_from_fs16_to_mg        lsm6dsox_from_fs16_to_mg
+#define lsm_from_fs125_to_mdps     lsm6dsox_from_fs125_to_mdps
+#define lsm_from_fs250_to_mdps     lsm6dsox_from_fs250_to_mdps
+#define lsm_from_fs500_to_mdps     lsm6dsox_from_fs500_to_mdps
+#define lsm_from_fs1000_to_mdps    lsm6dsox_from_fs1000_to_mdps
 #define lsm_from_fs2000_to_mdps    lsm6dsox_from_fs2000_to_mdps
 #define lsm_from_lsb_to_celsius    lsm6dsox_from_lsb_to_celsius
 #else
@@ -225,6 +243,66 @@ static stmdev_ctx_t dev_ctx = {
     .write_reg = platform_write,
 };
 
+// Defaults match py_imu_init() below: 52 Hz ODR, 8g accel, 2000 dps gyro.
+// Enum codes are identical across LSM6DS3/DSM/DSOX, so a uint8_t is portable.
+static uint8_t xl_odr_code = 3;  // LSM_XL_ODR_52Hz
+static uint8_t gy_odr_code = 3;  // LSM_GY_ODR_52Hz
+static uint8_t xl_fs_code  = 3;  // LSM_8g
+static uint8_t gy_fs_code  = 6;  // LSM_2000dps
+
+static float xl_lsb_to_mg(int16_t lsb) {
+    switch (xl_fs_code) {
+        case LSM_CONST(2g):  return lsm_from_fs2_to_mg(lsb);
+        case LSM_CONST(4g):  return lsm_from_fs4_to_mg(lsb);
+        case LSM_CONST(16g): return lsm_from_fs16_to_mg(lsb);
+        default:             return lsm_from_fs8_to_mg(lsb);
+    }
+}
+
+static float gy_lsb_to_mdps(int16_t lsb) {
+    switch (gy_fs_code) {
+        case LSM_CONST(125dps):  return lsm_from_fs125_to_mdps(lsb);
+        case LSM_CONST(250dps):  return lsm_from_fs250_to_mdps(lsb);
+        case LSM_CONST(500dps):  return lsm_from_fs500_to_mdps(lsb);
+        case LSM_CONST(1000dps): return lsm_from_fs1000_to_mdps(lsb);
+        default:                 return lsm_from_fs2000_to_mdps(lsb);
+    }
+}
+
+// ODR enum codes (0..10) are common across LSM6DS3/DSM/DSOX. Code 11 (1.6 Hz
+// low-power, accel only) is intentionally excluded so accel and gyro can share
+// the same setting.
+static const struct {
+    uint8_t code;
+    float hz;
+} odr_table[] = {
+    { 0,    0.0f }, { 1,   12.5f }, { 2,   26.0f }, { 3,   52.0f },
+    { 4,  104.0f }, { 5,  208.0f }, { 6,  416.0f }, { 7,  833.0f },
+    { 8, 1660.0f }, { 9, 3330.0f }, { 10, 6660.0f },
+};
+
+static uint8_t hz_to_odr_code(float hz) {
+    if (hz <= 0.0f) {
+        return 0;
+    }
+    // Pick the lowest table entry whose rate is >= the request; if none, max out.
+    for (size_t i = 1; i < MP_ARRAY_SIZE(odr_table); i++) {
+        if (hz <= odr_table[i].hz) {
+            return odr_table[i].code;
+        }
+    }
+    return odr_table[MP_ARRAY_SIZE(odr_table) - 1].code;
+}
+
+static float odr_code_to_hz(uint8_t code) {
+    for (size_t i = 0; i < MP_ARRAY_SIZE(odr_table); i++) {
+        if (odr_table[i].code == code) {
+            return odr_table[i].hz;
+        }
+    }
+    return 0.0f;
+}
+
 static void error_on_not_ready() {
     if (!imu_initialized) {
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("IMU Not Ready!"));
@@ -275,17 +353,17 @@ static float py_imu_get_roll() {
     axis3bit16_t data_raw_acceleration = {};
     LSM_FUNC(acceleration_raw_get) (&dev_ctx, data_raw_acceleration.u8bit);
     #if OMV_IMU_X_Y_ROTATION_DEGREES == 0
-    float xr = lsm_from_fs8_to_mg(data_raw_acceleration.i16bit[0]); // x
-    float yr = lsm_from_fs8_to_mg(data_raw_acceleration.i16bit[1]); // y
+    float xr = xl_lsb_to_mg(data_raw_acceleration.i16bit[0]); // x
+    float yr = xl_lsb_to_mg(data_raw_acceleration.i16bit[1]); // y
     #elif OMV_IMU_X_Y_ROTATION_DEGREES == 90
-    float xr = -lsm_from_fs8_to_mg(data_raw_acceleration.i16bit[1]); // y
-    float yr = lsm_from_fs8_to_mg(data_raw_acceleration.i16bit[0]); // x
+    float xr = -xl_lsb_to_mg(data_raw_acceleration.i16bit[1]); // y
+    float yr = xl_lsb_to_mg(data_raw_acceleration.i16bit[0]); // x
     #elif OMV_IMU_X_Y_ROTATION_DEGREES == 180
-    float xr = -lsm_from_fs8_to_mg(data_raw_acceleration.i16bit[0]); // x
-    float yr = -lsm_from_fs8_to_mg(data_raw_acceleration.i16bit[1]); // y
+    float xr = -xl_lsb_to_mg(data_raw_acceleration.i16bit[0]); // x
+    float yr = -xl_lsb_to_mg(data_raw_acceleration.i16bit[1]); // y
     #elif OMV_IMU_X_Y_ROTATION_DEGREES == 270
-    float xr = lsm_from_fs8_to_mg(data_raw_acceleration.i16bit[1]); // y
-    float yr = -lsm_from_fs8_to_mg(data_raw_acceleration.i16bit[0]); // x
+    float xr = xl_lsb_to_mg(data_raw_acceleration.i16bit[1]); // y
+    float yr = -xl_lsb_to_mg(data_raw_acceleration.i16bit[0]); // x
     #endif
     #if OMV_IMU_MOUNTING_Z_DIRECTION == 1 // default is -1 (IMU pointing reverse of camera)
     xr = -xr;
@@ -298,17 +376,17 @@ static float py_imu_get_pitch() {
     axis3bit16_t data_raw_acceleration = {};
     LSM_FUNC(acceleration_raw_get) (&dev_ctx, data_raw_acceleration.u8bit);
     #if OMV_IMU_X_Y_ROTATION_DEGREES == 0
-    float yr = lsm_from_fs8_to_mg(data_raw_acceleration.i16bit[1]); // y
-    float zr = lsm_from_fs8_to_mg(data_raw_acceleration.i16bit[2]); // z
+    float yr = xl_lsb_to_mg(data_raw_acceleration.i16bit[1]); // y
+    float zr = xl_lsb_to_mg(data_raw_acceleration.i16bit[2]); // z
     #elif OMV_IMU_X_Y_ROTATION_DEGREES == 90
-    float yr = lsm_from_fs8_to_mg(data_raw_acceleration.i16bit[0]); // x
-    float zr = lsm_from_fs8_to_mg(data_raw_acceleration.i16bit[2]); // z
+    float yr = xl_lsb_to_mg(data_raw_acceleration.i16bit[0]); // x
+    float zr = xl_lsb_to_mg(data_raw_acceleration.i16bit[2]); // z
     #elif OMV_IMU_X_Y_ROTATION_DEGREES == 180
-    float yr = -lsm_from_fs8_to_mg(data_raw_acceleration.i16bit[1]); // y
-    float zr = lsm_from_fs8_to_mg(data_raw_acceleration.i16bit[2]); // z
+    float yr = -xl_lsb_to_mg(data_raw_acceleration.i16bit[1]); // y
+    float zr = xl_lsb_to_mg(data_raw_acceleration.i16bit[2]); // z
     #elif OMV_IMU_X_Y_ROTATION_DEGREES == 270
-    float yr = -lsm_from_fs8_to_mg(data_raw_acceleration.i16bit[0]); // x
-    float zr = lsm_from_fs8_to_mg(data_raw_acceleration.i16bit[2]); // z
+    float yr = -xl_lsb_to_mg(data_raw_acceleration.i16bit[0]); // x
+    float zr = xl_lsb_to_mg(data_raw_acceleration.i16bit[2]); // z
     #endif
     #if OMV_IMU_MOUNTING_Z_DIRECTION == 1 // default is -1 (IMU pointing reverse of camera)
     yr = -yr;
@@ -323,9 +401,9 @@ static mp_obj_t py_imu_acceleration_mg() {
 
     axis3bit16_t data_raw_acceleration = {};
     LSM_FUNC(acceleration_raw_get) (&dev_ctx, data_raw_acceleration.u8bit);
-    return py_imu_tuple(lsm_from_fs8_to_mg(data_raw_acceleration.i16bit[0]),
-                        lsm_from_fs8_to_mg(data_raw_acceleration.i16bit[1]),
-                        lsm_from_fs8_to_mg(data_raw_acceleration.i16bit[2]));
+    return py_imu_tuple(xl_lsb_to_mg(data_raw_acceleration.i16bit[0]),
+                        xl_lsb_to_mg(data_raw_acceleration.i16bit[1]),
+                        xl_lsb_to_mg(data_raw_acceleration.i16bit[2]));
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(py_imu_acceleration_mg_obj, py_imu_acceleration_mg);
 
@@ -334,9 +412,9 @@ static mp_obj_t py_imu_angular_rate_mdps() {
 
     axis3bit16_t data_raw_angular_rate = {};
     LSM_FUNC(angular_rate_raw_get) (&dev_ctx, data_raw_angular_rate.u8bit);
-    return py_imu_tuple(lsm_from_fs2000_to_mdps(data_raw_angular_rate.i16bit[0]),
-                        lsm_from_fs2000_to_mdps(data_raw_angular_rate.i16bit[1]),
-                        lsm_from_fs2000_to_mdps(data_raw_angular_rate.i16bit[2]));
+    return py_imu_tuple(gy_lsb_to_mdps(data_raw_angular_rate.i16bit[0]),
+                        gy_lsb_to_mdps(data_raw_angular_rate.i16bit[1]),
+                        gy_lsb_to_mdps(data_raw_angular_rate.i16bit[2]));
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(py_imu_angular_rate_mdps_obj, py_imu_angular_rate_mdps);
 
@@ -367,11 +445,92 @@ static mp_obj_t py_imu_sleep(mp_obj_t enable) {
     error_on_not_ready();
 
     bool en = mp_obj_get_int(enable);
-    LSM_FUNC(xl_data_rate_set) (&dev_ctx, en ? LSM_CONST(XL_ODR_OFF) : LSM_CONST(XL_ODR_52Hz));
-    LSM_FUNC(gy_data_rate_set) (&dev_ctx, en ? LSM_CONST(GY_ODR_OFF) : LSM_CONST(GY_ODR_52Hz));
+    LSM_FUNC(xl_data_rate_set) (&dev_ctx, en ? LSM_CONST(XL_ODR_OFF) : xl_odr_code);
+    LSM_FUNC(gy_data_rate_set) (&dev_ctx, en ? LSM_CONST(GY_ODR_OFF) : gy_odr_code);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(py_imu_sleep_obj, py_imu_sleep);
+
+// imu.data_rate([hz]) — get/set the accelerometer + gyroscope output data
+// rate. Pass 0 to power both axes down. The chip only supports a fixed set of
+// ODRs; the request is snapped up to the next supported rate (returned).
+static mp_obj_t py_imu_data_rate(size_t n_args, const mp_obj_t *args) {
+    error_on_not_ready();
+
+    if (n_args > 0) {
+        uint8_t code = hz_to_odr_code(mp_obj_get_float(args[0]));
+        if (LSM_FUNC(xl_data_rate_set) (&dev_ctx, code) ||
+            LSM_FUNC(gy_data_rate_set) (&dev_ctx, code)) {
+            mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("IMU data rate set failed"));
+        }
+        xl_odr_code = code;
+        gy_odr_code = code;
+    }
+    return mp_obj_new_float(odr_code_to_hz(xl_odr_code));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(py_imu_data_rate_obj, 0, 1, py_imu_data_rate);
+
+// imu.accel_full_scale([g]) — get/set the accelerometer full scale.
+// Valid values: 2, 4, 8, 16. Returns the active full scale.
+static mp_obj_t py_imu_accel_full_scale(size_t n_args, const mp_obj_t *args) {
+    error_on_not_ready();
+
+    if (n_args > 0) {
+        int g = mp_obj_get_int(args[0]);
+        uint8_t code;
+        switch (g) {
+            case 2:  code = LSM_CONST(2g);  break;
+            case 4:  code = LSM_CONST(4g);  break;
+            case 8:  code = LSM_CONST(8g);  break;
+            case 16: code = LSM_CONST(16g); break;
+            default:
+                mp_raise_ValueError(MP_ERROR_TEXT("accel full scale must be 2, 4, 8, or 16"));
+        }
+        if (LSM_FUNC(xl_full_scale_set) (&dev_ctx, code)) {
+            mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("IMU accel scale set failed"));
+        }
+        xl_fs_code = code;
+    }
+    switch (xl_fs_code) {
+        case LSM_CONST(2g):  return mp_obj_new_int(2);
+        case LSM_CONST(4g):  return mp_obj_new_int(4);
+        case LSM_CONST(16g): return mp_obj_new_int(16);
+        default:             return mp_obj_new_int(8);
+    }
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(py_imu_accel_full_scale_obj, 0, 1, py_imu_accel_full_scale);
+
+// imu.gyro_full_scale([dps]) — get/set the gyroscope full scale.
+// Valid values: 125, 250, 500, 1000, 2000. Returns the active full scale.
+static mp_obj_t py_imu_gyro_full_scale(size_t n_args, const mp_obj_t *args) {
+    error_on_not_ready();
+
+    if (n_args > 0) {
+        int dps = mp_obj_get_int(args[0]);
+        uint8_t code;
+        switch (dps) {
+            case 125:  code = LSM_CONST(125dps);  break;
+            case 250:  code = LSM_CONST(250dps);  break;
+            case 500:  code = LSM_CONST(500dps);  break;
+            case 1000: code = LSM_CONST(1000dps); break;
+            case 2000: code = LSM_CONST(2000dps); break;
+            default:
+                mp_raise_ValueError(MP_ERROR_TEXT("gyro full scale must be 125, 250, 500, 1000, or 2000"));
+        }
+        if (LSM_FUNC(gy_full_scale_set) (&dev_ctx, code)) {
+            mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("IMU gyro scale set failed"));
+        }
+        gy_fs_code = code;
+    }
+    switch (gy_fs_code) {
+        case LSM_CONST(125dps):  return mp_obj_new_int(125);
+        case LSM_CONST(250dps):  return mp_obj_new_int(250);
+        case LSM_CONST(500dps):  return mp_obj_new_int(500);
+        case LSM_CONST(1000dps): return mp_obj_new_int(1000);
+        default:                 return mp_obj_new_int(2000);
+    }
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(py_imu_gyro_full_scale_obj, 0, 1, py_imu_gyro_full_scale);
 
 static mp_obj_t py_imu_write_reg(mp_obj_t addr, mp_obj_t val) {
     error_on_not_ready();
@@ -399,6 +558,9 @@ static const mp_rom_map_elem_t globals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_roll),                MP_ROM_PTR(&py_imu_roll_obj) },
     { MP_ROM_QSTR(MP_QSTR_pitch),               MP_ROM_PTR(&py_imu_pitch_obj) },
     { MP_ROM_QSTR(MP_QSTR_sleep),               MP_ROM_PTR(&py_imu_sleep_obj) },
+    { MP_ROM_QSTR(MP_QSTR_data_rate),           MP_ROM_PTR(&py_imu_data_rate_obj) },
+    { MP_ROM_QSTR(MP_QSTR_accel_full_scale),    MP_ROM_PTR(&py_imu_accel_full_scale_obj) },
+    { MP_ROM_QSTR(MP_QSTR_gyro_full_scale),     MP_ROM_PTR(&py_imu_gyro_full_scale_obj) },
     { MP_ROM_QSTR(MP_QSTR___write_reg),         MP_ROM_PTR(&py_imu_write_reg_obj) },
     { MP_ROM_QSTR(MP_QSTR___read_reg),          MP_ROM_PTR(&py_imu_read_reg_obj) },
 };
@@ -440,11 +602,16 @@ void py_imu_init() {
 
     LSM_FUNC(block_data_update_set) (&dev_ctx, PROPERTY_ENABLE);
 
-    LSM_FUNC(xl_data_rate_set) (&dev_ctx, LSM_CONST(XL_ODR_52Hz));
-    LSM_FUNC(gy_data_rate_set) (&dev_ctx, LSM_CONST(GY_ODR_52Hz));
+    xl_odr_code = LSM_CONST(XL_ODR_52Hz);
+    gy_odr_code = LSM_CONST(GY_ODR_52Hz);
+    xl_fs_code  = LSM_CONST(8g);
+    gy_fs_code  = LSM_CONST(2000dps);
 
-    LSM_FUNC(xl_full_scale_set) (&dev_ctx, LSM_CONST(8g));
-    LSM_FUNC(gy_full_scale_set) (&dev_ctx, LSM_CONST(2000dps));
+    LSM_FUNC(xl_data_rate_set) (&dev_ctx, xl_odr_code);
+    LSM_FUNC(gy_data_rate_set) (&dev_ctx, gy_odr_code);
+
+    LSM_FUNC(xl_full_scale_set) (&dev_ctx, xl_fs_code);
+    LSM_FUNC(gy_full_scale_set) (&dev_ctx, gy_fs_code);
 
     imu_initialized = true;
 }
