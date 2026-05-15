@@ -1,4 +1,4 @@
-# OpenMV library
+# OpenMV librar
 add_library("openmv-lib", "$(OMV_LIB_DIR)")
 
 # Drivers
