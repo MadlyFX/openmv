@@ -259,6 +259,27 @@ vbuffer_t *framebuffer_release(framebuffer_t *fb, uint32_t flags) {
     return buffer;
 }
 
+void framebuffer_release_buffer(framebuffer_t *fb, vbuffer_t *buffer, uint32_t flags) {
+    if (!buffer) {
+        return;
+    }
+
+    #ifdef __DCACHE_PRESENT
+    // Discard any cached CPU writes.
+    if (flags & FB_FLAG_INVALIDATE) {
+        SCB_InvalidateDCache_by_Addr(buffer->data, fb->buf_size);
+    }
+    #endif
+
+    if (flags & FB_FLAG_USED) {
+        fb->pixfmt = PIXFORMAT_INVALID;
+        framebuffer_reset(buffer);
+        queue_push(fb->free_queue, buffer);
+    } else {
+        queue_push(fb->used_queue, buffer);
+    }
+}
+
 void framebuffer_update_preview(image_t *src) {
     static int overflow_count = 0;
     framebuffer_t *fb = framebuffer_get(FB_STREAM_ID);

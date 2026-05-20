@@ -168,6 +168,9 @@ vbuffer_t *framebuffer_acquire(framebuffer_t *fb, uint32_t flags);
 // Note: Returns NULL if the buffer was Not released.
 vbuffer_t *framebuffer_release(framebuffer_t *fb, uint32_t flags);
 
+// Release a buffer previously acquired without PEEK.
+void framebuffer_release_buffer(framebuffer_t *fb, vbuffer_t *buffer, uint32_t flags);
+
 // Reset a vbuffer state.
 static inline void framebuffer_reset(vbuffer_t *buffer) {
     memset(buffer, 0, offsetof(vbuffer_t, data));

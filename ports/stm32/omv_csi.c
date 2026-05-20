@@ -432,6 +432,13 @@ static void stm_csi_frame_event(omv_csi_t *csi, uint32_t pipe) {
     // Acquire a buffer from the free queue.
     vbuffer_t *buffer = framebuffer_acquire(fb, FB_FLAG_FREE | FB_FLAG_PEEK);
 
+    if (buffer == NULL && csi->recorder_active && csi->recorder_drop_frames) {
+        if (framebuffer_release(fb, FB_FLAG_USED | FB_FLAG_INVALIDATE)) {
+            csi->recorder_dropped_frames++;
+            buffer = framebuffer_acquire(fb, FB_FLAG_FREE | FB_FLAG_PEEK);
+        }
+    }
+
     if (buffer == NULL) {
         omv_csi_abort(csi, false, false);
     } else if (csi->mipi_if) {

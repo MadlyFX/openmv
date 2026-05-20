@@ -43,6 +43,7 @@
 
 #include "imlib.h"
 #include "py_assert.h"
+#include "py_csi.h"
 #include "py_image.h"
 #if MICROPY_PY_IMU
 #include "py_imu.h"
@@ -61,16 +62,7 @@
 #define omv_csi_print_error(op) \
     printf("\x1B[31mWARNING: %s control is not supported by this image sensor.\x1B[0m\n", op);
 
-typedef struct _py_csi_obj_t {
-    mp_obj_base_t base;
-    omv_csi_t *csi;
-    void *raw;
-    mp_obj_t vsync_cb;
-    mp_obj_t frame_cb;
-} py_csi_obj_t;
-
 const mp_obj_type_t py_csi_type;
-
 #if MICROPY_PY_IMU
 static void omv_csi_set_rotation(omv_csi_t *csi, int pitch_deadzone, int roll_activezone) {
     if (omv_csi_get_auto_rotation(csi)) {

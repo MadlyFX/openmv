@@ -319,6 +319,10 @@ __weak int omv_csi_reset(omv_csi_t *csi, bool hard) {
     #endif // MICROPY_PY_IMU
     csi->color_palette = rainbow_table;
     csi->disable_full_flush = false;
+    csi->recorder_active = false;
+    csi->recorder_drop_frames = false;
+    csi->recorder_dropped_frames = 0;
+    csi->recorder_buffer = NULL;
     csi->vsync_cb = (omv_csi_cb_t) {
         NULL, NULL
     };
@@ -1688,6 +1692,71 @@ __weak int omv_csi_snapshot(omv_csi_t *csi, image_t *image, uint32_t flags) {
     }
 
     return ret;
+}
+
+int omv_csi_recorder_start(omv_csi_t *csi, bool drop_frames) {
+    if (!csi->snapshot) {
+        return OMV_CSI_ERROR_CTL_UNSUPPORTED;
+    }
+
+    if (csi->pixformat == PIXFORMAT_INVALID) {
+        return OMV_CSI_ERROR_INVALID_PIXFORMAT;
+    }
+
+    if (csi->framesize == OMV_CSI_FRAMESIZE_INVALID) {
+        return OMV_CSI_ERROR_INVALID_FRAMESIZE;
+    }
+
+    if (csi->fb->buf_count < 4) {
+        return OMV_CSI_ERROR_INVALID_ARGUMENT;
+    }
+
+    if (omv_csi_check_framebuffer_size(csi) == -1) {
+        return OMV_CSI_ERROR_FRAMEBUFFER_OVERFLOW;
+    }
+
+    framebuffer_flush(csi->fb);
+    csi->recorder_active = true;
+    csi->recorder_drop_frames = drop_frames;
+    csi->recorder_dropped_frames = 0;
+    csi->recorder_buffer = NULL;
+    return 0;
+}
+
+int omv_csi_recorder_acquire(omv_csi_t *csi, image_t *image, uint32_t flags) {
+    if (!csi->recorder_active) {
+        return OMV_CSI_ERROR_INVALID_ARGUMENT;
+    }
+
+    if (csi->recorder_buffer != NULL) {
+        return OMV_CSI_ERROR_FRAMEBUFFER_ERROR;
+    }
+
+    int ret = csi->snapshot(csi, image, flags | OMV_CSI_FLAG_NO_UPDATE | OMV_CSI_FLAG_NO_POST);
+    if (ret >= 0) {
+        csi->recorder_buffer = framebuffer_acquire(csi->fb, FB_FLAG_USED);
+        if (csi->recorder_buffer == NULL) {
+            ret = OMV_CSI_ERROR_FRAMEBUFFER_ERROR;
+        }
+    }
+
+    return ret;
+}
+
+void omv_csi_recorder_release(omv_csi_t *csi) {
+    if (csi->recorder_buffer) {
+        framebuffer_release_buffer(csi->fb, csi->recorder_buffer, FB_FLAG_USED | FB_FLAG_INVALIDATE);
+        csi->recorder_buffer = NULL;
+    }
+}
+
+void omv_csi_recorder_stop(omv_csi_t *csi) {
+    if (csi->recorder_active) {
+        omv_csi_recorder_release(csi);
+        csi->recorder_active = false;
+        csi->recorder_drop_frames = false;
+        omv_csi_abort(csi, true, false);
+    }
 }
 
 const char *omv_csi_name(omv_csi_t *csi) {

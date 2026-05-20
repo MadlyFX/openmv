@@ -331,6 +331,10 @@ typedef struct _omv_csi {
     const uint16_t *color_palette;    // Color palette used for color lookup.
     bool disable_delays;        // Set to true to disable all sensor settling time delays.
     bool disable_full_flush;    // Turn off default frame buffer flush policy when full.
+    bool recorder_active;       // Native recorder is draining the frame buffer FIFO.
+    bool recorder_drop_frames;  // Drop old queued frames instead of stopping capture.
+    uint32_t recorder_dropped_frames; // Frames dropped while recorder was active.
+    vbuffer_t *recorder_buffer; // Recorder-owned frame buffer.
 
     omv_csi_cb_t vsync_cb;      // VSYNC callback
     omv_csi_cb_t frame_cb;      // Frame callback
@@ -606,6 +610,13 @@ int omv_csi_copy_line(omv_csi_t *csi, void *dma, uint8_t *src, uint8_t *dst);
 
 // Default snapshot function.
 int omv_csi_snapshot(omv_csi_t *csi, image_t *image, uint32_t flags);
+
+// Native recorder helpers. These bypass IDE preview updates and leave
+// frame release under recorder control.
+int omv_csi_recorder_start(omv_csi_t *csi, bool drop_frames);
+int omv_csi_recorder_acquire(omv_csi_t *csi, image_t *image, uint32_t flags);
+void omv_csi_recorder_release(omv_csi_t *csi);
+void omv_csi_recorder_stop(omv_csi_t *csi);
 
 // Convert csi chip id to string.
 const char *omv_csi_name(omv_csi_t *csi);
