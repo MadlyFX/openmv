@@ -47,8 +47,8 @@ typedef struct {
 
 typedef struct {
     const void *inst;
-    uint8_t *chroma;
-    size_t chroma_size;
+    uint8_t *input_scratch;
+    size_t input_scratch_size;
     uint32_t frames;
     uint32_t gop;
     bool grayscale;

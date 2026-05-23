@@ -115,7 +115,7 @@ static int stm_h264_ret_to_error(H264EncRet ret) {
 static int stm_h264_picture_type(pixformat_t pixformat, H264EncPictureType *type) {
     switch (pixformat) {
         case PIXFORMAT_GRAYSCALE:
-            *type = H264ENC_YUV420_SEMIPLANAR;
+            *type = H264ENC_YUV422_INTERLEAVED_YUYV;
             return STM_H264_OK;
         case PIXFORMAT_RGB565:
             *type = H264ENC_RGB565;
@@ -190,24 +190,35 @@ static int stm_h264_stream_start(stm_h264_t *ctx, uint8_t *out, size_t out_size,
     return STM_H264_OK;
 }
 
-static int stm_h264_alloc_chroma(stm_h264_t *ctx, const stm_h264_config_t *config) {
+static int stm_h264_alloc_input_scratch(stm_h264_t *ctx, const stm_h264_config_t *config) {
     if (config->pixformat != PIXFORMAT_GRAYSCALE) {
         return STM_H264_OK;
     }
 
-    ctx->chroma_size = OMV_ALIGN_TO(((size_t) config->width * (size_t) config->height) / 2,
-                                    OMV_CACHE_LINE_SIZE);
-    ctx->chroma = uma_malign(ctx->chroma_size, OMV_CACHE_LINE_SIZE,
-                             UMA_PERSIST | UMA_CACHE | UMA_MAYBE);
-    if (!ctx->chroma) {
-        ctx->chroma_size = 0;
+    ctx->input_scratch_size = OMV_ALIGN_TO((size_t) config->width * (size_t) config->height * 2,
+                                           OMV_CACHE_LINE_SIZE);
+    ctx->input_scratch = uma_malign(ctx->input_scratch_size, OMV_CACHE_LINE_SIZE,
+                                    UMA_PERSIST | UMA_CACHE | UMA_MAYBE);
+    if (!ctx->input_scratch) {
+        ctx->input_scratch_size = 0;
         return STM_H264_MEMORY;
     }
 
-    memset(ctx->chroma, STM_H264_NEUTRAL_CHROMA, ctx->chroma_size);
-    stm_h264_cache_clean(ctx->chroma, ctx->chroma_size);
     ctx->grayscale = true;
     return STM_H264_OK;
+}
+
+static void stm_h264_pack_grayscale_yuyv(const image_t *src, uint8_t *dst) {
+    const uint8_t *gray = src->data;
+    uint32_t *yuyv = (uint32_t *) dst;
+    size_t pixels = (size_t) src->w * (size_t) src->h;
+
+    for (size_t i = 0; i < pixels; i += 2) {
+        *yuyv++ = ((uint32_t) STM_H264_NEUTRAL_CHROMA << 24) |
+                  ((uint32_t) gray[i + 1] << 16) |
+                  ((uint32_t) STM_H264_NEUTRAL_CHROMA << 8) |
+                  ((uint32_t) gray[i + 0]);
+    }
 }
 
 static void stm_h264_setup_rate_control(H264EncRateCtrl *rate, int bitrate, int gop, int qp) {
@@ -269,7 +280,7 @@ int stm_h264_init(stm_h264_t *ctx, const stm_h264_config_t *config) {
     ctx->gop = (config->gop > 0) ? config->gop : config->fps;
     ctx->gop = OMV_MIN(OMV_MAX(ctx->gop, 1), 300);
 
-    error = stm_h264_alloc_chroma(ctx, config);
+    error = stm_h264_alloc_input_scratch(ctx, config);
     if (error != STM_H264_OK) {
         return error;
     }
@@ -376,9 +387,21 @@ int stm_h264_encode(stm_h264_t *ctx, image_t *src,
     uint8_t *frame_out = out + header_len;
     size_t frame_out_size = out_size - header_len;
     size_t src_size = image_size(src);
+    uint8_t *input = src->data;
 
-    enc_in.busLuma = (ptr_t) src->data;
-    enc_in.busChromaU = (ctx->grayscale) ? (ptr_t) ctx->chroma : 0;
+    stm_h264_cache_invalidate(src->data, src_size);
+    if (ctx->grayscale) {
+        if (src->pixfmt != PIXFORMAT_GRAYSCALE || !ctx->input_scratch) {
+            return STM_H264_INVALID_ARGUMENT;
+        }
+
+        stm_h264_pack_grayscale_yuyv(src, ctx->input_scratch);
+        stm_h264_cache_clean(ctx->input_scratch, ctx->input_scratch_size);
+        input = ctx->input_scratch;
+    }
+
+    enc_in.busLuma = (ptr_t) input;
+    enc_in.busChromaU = 0;
     enc_in.busChromaV = 0;
     enc_in.pOutBuf = (u32 *) frame_out;
     enc_in.busOutBuf = (ptr_t) frame_out;
@@ -391,13 +414,6 @@ int stm_h264_encode(stm_h264_t *ctx, image_t *src,
     enc_in.lineBufWrCnt = 0;
     enc_in.sendAUD = 0;
 
-    if (ctx->grayscale) {
-        if (src->pixfmt != PIXFORMAT_GRAYSCALE || !ctx->chroma) {
-            return STM_H264_INVALID_ARGUMENT;
-        }
-    }
-
-    stm_h264_cache_clean(src->data, src_size);
     stm_h264_cache_clean_invalidate(frame_out, frame_out_size);
 
     H264EncRet ret = H264EncStrmEncode(ctx->inst, &enc_in, &enc_out, NULL, NULL, NULL);
@@ -449,10 +465,10 @@ void stm_h264_deinit(stm_h264_t *ctx) {
         ctx->inst = NULL;
     }
 
-    if (ctx->chroma) {
-        uma_free(ctx->chroma);
-        ctx->chroma = NULL;
-        ctx->chroma_size = 0;
+    if (ctx->input_scratch) {
+        uma_free(ctx->input_scratch);
+        ctx->input_scratch = NULL;
+        ctx->input_scratch_size = 0;
         ctx->grayscale = false;
     }
 
