@@ -25,6 +25,7 @@
 
 #define PY_VIDEO_CODEC_H264             (1)
 #define PY_VIDEO_CODEC_MJPEG            (2)
+#define PY_VIDEO_CODEC_RAW              (3)
 #define PY_VIDEO_DEFAULT_FPS            (30)
 #define PY_VIDEO_DEFAULT_BITRATE        (50000000)
 #define PY_VIDEO_DEFAULT_QUALITY        (90)
@@ -47,6 +48,7 @@ typedef struct py_video_recorder {
     uint32_t mjpeg_bytes;
     uint32_t us_old;
     uint32_t us_intervals;
+    uint32_t elapsed_ms;
     uint64_t us_total;
     uint32_t frames;
     uint32_t dropped;
@@ -95,6 +97,24 @@ static void py_video_raise_mjpeg_error(const char *operation, int error) {
                       operation, message);
 }
 
+static void py_video_raise_raw_error(const char *operation, int error) {
+    const char *message = "RAW recorder error";
+    switch (error) {
+        case -1:
+            message = "captured frame size does not match recorder size";
+            break;
+        case -2:
+            message = "RAW requires grayscale or Bayer capture";
+            break;
+        default:
+            break;
+    }
+
+    mp_raise_msg_varg(&mp_type_RuntimeError,
+                      MP_ERROR_TEXT("RAW %s failed: %s"),
+                      operation, message);
+}
+
 static void py_video_validate_output_path(const char *path) {
     const char *path_out = path;
     if (mp_vfs_lookup_path(path, &path_out) == MP_VFS_NONE) {
@@ -135,6 +155,12 @@ static void py_video_writer_flush(py_video_recorder_t *self) {
 }
 
 static void py_video_writer_write(py_video_recorder_t *self, const uint8_t *data, size_t size) {
+    if (size >= self->write_size) {
+        py_video_writer_flush(self);
+        file_write(&self->fp, data, size);
+        return;
+    }
+
     while (size) {
         size_t space = self->write_size - self->write_pos;
         size_t chunk = OMV_MIN(space, size);
@@ -167,6 +193,17 @@ static bool py_video_mjpeg_pixformat_supported(pixformat_t pixformat) {
         case PIXFORMAT_RGB565:
         case PIXFORMAT_BAYER_ANY:
         case PIXFORMAT_YUV_ANY:
+        case PIXFORMAT_JPEG:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static bool py_video_raw_pixformat_supported(pixformat_t pixformat) {
+    switch (pixformat) {
+        case PIXFORMAT_GRAYSCALE:
+        case PIXFORMAT_BAYER_ANY:
             return true;
         default:
             return false;
@@ -180,22 +217,29 @@ static int py_video_mjpeg_encode(py_video_recorder_t *self, image_t *image) {
         return -1;
     }
 
-    image_t jpeg = {
-        .w = image->w,
-        .h = image->h,
-        .pixfmt = PIXFORMAT_JPEG,
-        .size = self->out_size,
-        .data = self->out_buf,
-    };
+    image_t jpeg;
 
     py_video_cache_invalidate(image->data, image_size(image));
-    if (jpeg_compress(image, &jpeg, self->quality, false, JPEG_SUBSAMPLING_444)) {
-        return -2;
+    bool passthrough = image->pixfmt == PIXFORMAT_JPEG;
+    if (passthrough) {
+        jpeg = *image;
+    } else {
+        jpeg = (image_t) {
+            .w = image->w,
+            .h = image->h,
+            .pixfmt = PIXFORMAT_JPEG,
+            .size = self->out_size,
+            .data = self->out_buf,
+        };
+
+        if (jpeg_compress(image, &jpeg, self->quality, false, JPEG_SUBSAMPLING_444)) {
+            return -2;
+        }
     }
 
     uint32_t jpeg_size = jpeg.size;
     uint32_t size_padded = OMV_ALIGN_TO(jpeg_size, 4);
-    if ((size_padded < jpeg_size) || (size_padded > self->out_size)) {
+    if ((size_padded < jpeg_size) || (!passthrough && (size_padded > self->out_size))) {
         return -2;
     }
 
@@ -220,6 +264,22 @@ static int py_video_mjpeg_encode(py_video_recorder_t *self, image_t *image) {
     }
     self->us_old = ticks;
 
+    return 0;
+}
+
+static int py_video_raw_write(py_video_recorder_t *self, image_t *image) {
+    if ((image->w != self->width) || (image->h != self->height)) {
+        return -1;
+    }
+
+    if (!py_video_raw_pixformat_supported(image->pixfmt)) {
+        return -2;
+    }
+
+    size_t size = image_size(image);
+    py_video_cache_invalidate(image->data, size);
+    py_video_writer_write(self, image->data, size);
+    self->bytes += size;
     return 0;
 }
 
@@ -262,7 +322,11 @@ static mp_obj_t py_video_recorder_status_obj(py_video_recorder_t *self) {
     mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_dropped), mp_obj_new_int_from_uint(self->dropped));
     mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_bytes), mp_obj_new_int_from_ull(self->bytes));
     mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_codec), mp_obj_new_int(self->codec));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_width), mp_obj_new_int(self->width));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_height), mp_obj_new_int(self->height));
     mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_fps), mp_obj_new_int(self->fps));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_actual_fps),
+                      mp_obj_new_float(self->elapsed_ms ? ((self->frames * 1000.0f) / self->elapsed_ms) : 0));
     mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_bitrate), mp_obj_new_int(self->bitrate));
     mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_qp), mp_obj_new_int(self->qp));
     mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_quality), mp_obj_new_int(self->quality));
@@ -340,8 +404,10 @@ static mp_obj_t py_video_recorder_record(size_t n_args, const mp_obj_t *pos_args
                     error = stm_h264_encode(&self->h264, &image,
                                             self->out_buf, self->out_size,
                                             &out_len, false);
-                } else {
+                } else if (self->codec == PY_VIDEO_CODEC_MJPEG) {
                     error = py_video_mjpeg_encode(self, &image);
+                } else {
+                    error = py_video_raw_write(self, &image);
                 }
                 nlr_pop();
             } else {
@@ -353,8 +419,10 @@ static mp_obj_t py_video_recorder_record(size_t n_args, const mp_obj_t *pos_args
             if (error < 0) {
                 if (self->codec == PY_VIDEO_CODEC_H264) {
                     py_video_raise_h264_error("encode", error);
-                } else {
+                } else if (self->codec == PY_VIDEO_CODEC_MJPEG) {
                     py_video_raise_mjpeg_error("encode", error);
+                } else {
+                    py_video_raise_raw_error("write", error);
                 }
             }
 
@@ -370,6 +438,7 @@ static mp_obj_t py_video_recorder_record(size_t n_args, const mp_obj_t *pos_args
         }
 
         py_video_recorder_stop_internal(self);
+        self->elapsed_ms += mp_hal_ticks_ms() - start_ms;
         py_video_writer_flush(self);
         nlr_pop();
     } else {
@@ -469,7 +538,8 @@ static mp_obj_t py_video_recorder_make_new(const mp_obj_type_t *type,
     }
 
     if ((args[ARG_codec].u_int != PY_VIDEO_CODEC_H264) &&
-        (args[ARG_codec].u_int != PY_VIDEO_CODEC_MJPEG)) {
+        (args[ARG_codec].u_int != PY_VIDEO_CODEC_MJPEG) &&
+        (args[ARG_codec].u_int != PY_VIDEO_CODEC_RAW)) {
         mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("unsupported video codec"));
     }
 
@@ -544,7 +614,7 @@ static mp_obj_t py_video_recorder_make_new(const mp_obj_type_t *type,
             py_video_free_buffers(self);
             py_video_raise_h264_error("init", error);
         }
-    } else {
+    } else if (self->codec == PY_VIDEO_CODEC_MJPEG) {
         if (!py_video_mjpeg_pixformat_supported(csi->pixformat)) {
             file_close(&self->fp);
             self->closed = true;
@@ -556,6 +626,14 @@ static mp_obj_t py_video_recorder_make_new(const mp_obj_type_t *type,
         mjpeg_open(&self->fp, self->width, self->height);
         self->mjpeg_opened = true;
         self->bytes = file_tell(&self->fp);
+    } else {
+        if (!py_video_raw_pixformat_supported(csi->pixformat)) {
+            file_close(&self->fp);
+            self->closed = true;
+            py_video_free_buffers(self);
+            mp_raise_msg(&mp_type_RuntimeError,
+                         MP_ERROR_TEXT("RAW requires grayscale or Bayer capture"));
+        }
     }
 
     return MP_OBJ_FROM_PTR(self);
@@ -585,6 +663,7 @@ static const mp_rom_map_elem_t py_video_globals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_Recorder), MP_ROM_PTR(&py_video_recorder_type) },
     { MP_ROM_QSTR(MP_QSTR_H264),     MP_ROM_INT(PY_VIDEO_CODEC_H264) },
     { MP_ROM_QSTR(MP_QSTR_MJPEG),    MP_ROM_INT(PY_VIDEO_CODEC_MJPEG) },
+    { MP_ROM_QSTR(MP_QSTR_RAW),      MP_ROM_INT(PY_VIDEO_CODEC_RAW) },
 };
 static MP_DEFINE_CONST_DICT(py_video_globals_dict, py_video_globals_dict_table);
 
