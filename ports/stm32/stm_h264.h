@@ -20,6 +20,19 @@ typedef enum {
     STM_H264_OVERFLOW = -3,
     STM_H264_MEMORY = -4,
     STM_H264_INVALID_ARGUMENT = -5,
+    STM_H264_NULL_ARGUMENT = -6,
+    STM_H264_EWL = -7,
+    STM_H264_INVALID_STATUS = -8,
+    STM_H264_HW_BUS = -9,
+    STM_H264_HW_DATA = -10,
+    STM_H264_HW_TIMEOUT = -11,
+    STM_H264_HW_RESERVED = -12,
+    STM_H264_SYSTEM = -13,
+    STM_H264_INSTANCE = -14,
+    STM_H264_HRD = -15,
+    STM_H264_HW_RESET = -16,
+    STM_H264_FUSE = -17,
+    STM_H264_BUSY = -18,
 } stm_h264_error_t;
 
 typedef struct {
@@ -28,13 +41,17 @@ typedef struct {
     int fps;
     int bitrate;
     int gop;
+    int qp;
     pixformat_t pixformat;
 } stm_h264_config_t;
 
 typedef struct {
     const void *inst;
+    uint8_t *chroma;
+    size_t chroma_size;
     uint32_t frames;
     uint32_t gop;
+    bool grayscale;
     bool started;
     bool hw_initialized;
 } stm_h264_t;

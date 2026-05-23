@@ -22,6 +22,7 @@
 
 import os
 import sys
+import time
 import vfs
 
 main_py = """import time
@@ -95,6 +96,37 @@ def create_file(path, data=None):
             f.write(data)
 
 
+def mount_sdcard(sdcard):
+    last_error = None
+
+    for _ in range(5):
+        try:
+            try:
+                sdcard.power(True)
+            except AttributeError:
+                pass
+            except Exception:
+                pass
+
+            fat = vfs.VfsFat(sdcard)
+            vfs.mount(fat, "/sdcard")
+            try:
+                os.remove("/flash/.openmv_sdcard_error.txt")
+            except Exception:
+                pass
+            return fat
+        except Exception as error:
+            last_error = error
+            time.sleep_ms(100)
+
+    try:
+        create_file("/flash/.openmv_sdcard_error.txt", repr(last_error))
+    except Exception:
+        pass
+
+    return None
+
+
 try:
     fat = vfs.VfsFat(bdev)
     vfs.mount(fat, "/flash")
@@ -116,18 +148,16 @@ except Exception:
     pass
 
 if sdcard is not None:
-    try:
-        fat = vfs.VfsFat(sdcard)
-        vfs.mount(fat, "/sdcard")
+    sdcard_fat = mount_sdcard(sdcard)
+    if sdcard_fat is not None:
+        fat = sdcard_fat
         os.chdir("/sdcard")
         sys.path.append("/sdcard")
         sys.path.append("/sdcard/lib")
-    except Exception:
-        pass  # Fail silently
 
 try:
     os.stat(".openmv_disk")
 except Exception:
     create_file(".openmv_disk")
 
-del os, sys, vfs, fat, bdev, sdcard
+del os, sys, time, vfs, fat, bdev, sdcard

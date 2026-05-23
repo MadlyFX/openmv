@@ -23,7 +23,9 @@
 #define STM_H264_MAX_BITRATE        (60000000)
 #define STM_H264_DEFAULT_QP         (25)
 #define STM_H264_MIN_QP             (10)
+#define STM_H264_MIN_USER_QP        (0)
 #define STM_H264_MAX_QP             (51)
+#define STM_H264_NEUTRAL_CHROMA     (0x80)
 
 static bool stm_h264_active = false;
 
@@ -71,23 +73,50 @@ static int stm_h264_ret_to_error(H264EncRet ret) {
         return STM_H264_OK;
     }
 
-    if (ret == H264ENC_OUTPUT_BUFFER_OVERFLOW) {
-        return STM_H264_OVERFLOW;
+    switch (ret) {
+        case H264ENC_ERROR:
+            return STM_H264_ERROR;
+        case H264ENC_NULL_ARGUMENT:
+            return STM_H264_NULL_ARGUMENT;
+        case H264ENC_INVALID_ARGUMENT:
+            return STM_H264_INVALID_ARGUMENT;
+        case H264ENC_MEMORY_ERROR:
+        case H264ENC_EWL_MEMORY_ERROR:
+            return STM_H264_MEMORY;
+        case H264ENC_EWL_ERROR:
+            return STM_H264_EWL;
+        case H264ENC_INVALID_STATUS:
+            return STM_H264_INVALID_STATUS;
+        case H264ENC_OUTPUT_BUFFER_OVERFLOW:
+            return STM_H264_OVERFLOW;
+        case H264ENC_HW_BUS_ERROR:
+            return STM_H264_HW_BUS;
+        case H264ENC_HW_DATA_ERROR:
+            return STM_H264_HW_DATA;
+        case H264ENC_HW_TIMEOUT:
+            return STM_H264_HW_TIMEOUT;
+        case H264ENC_HW_RESERVED:
+            return STM_H264_HW_RESERVED;
+        case H264ENC_SYSTEM_ERROR:
+            return STM_H264_SYSTEM;
+        case H264ENC_INSTANCE_ERROR:
+            return STM_H264_INSTANCE;
+        case H264ENC_HRD_ERROR:
+            return STM_H264_HRD;
+        case H264ENC_HW_RESET:
+            return STM_H264_HW_RESET;
+        case H264ENC_FUSE_ERROR:
+            return STM_H264_FUSE;
+        default:
+            return STM_H264_ERROR;
     }
-
-    if ((ret == H264ENC_MEMORY_ERROR) || (ret == H264ENC_EWL_MEMORY_ERROR)) {
-        return STM_H264_MEMORY;
-    }
-
-    if (ret == H264ENC_INVALID_ARGUMENT) {
-        return STM_H264_INVALID_ARGUMENT;
-    }
-
-    return STM_H264_ERROR;
 }
 
 static int stm_h264_picture_type(pixformat_t pixformat, H264EncPictureType *type) {
     switch (pixformat) {
+        case PIXFORMAT_GRAYSCALE:
+            *type = H264ENC_YUV420_SEMIPLANAR;
+            return STM_H264_OK;
         case PIXFORMAT_RGB565:
             *type = H264ENC_RGB565;
             return STM_H264_OK;
@@ -149,8 +178,6 @@ static int stm_h264_stream_start(stm_h264_t *ctx, uint8_t *out, size_t out_size,
         return stm_h264_ret_to_error(ret);
     }
 
-    stm_h264_cache_invalidate(out, enc_out.streamSize);
-
     int error = stm_h264_append_padding(out + enc_out.streamSize,
                                         out_size - enc_out.streamSize,
                                         &pad_len);
@@ -163,17 +190,49 @@ static int stm_h264_stream_start(stm_h264_t *ctx, uint8_t *out, size_t out_size,
     return STM_H264_OK;
 }
 
-static void stm_h264_setup_rate_control(H264EncRateCtrl *rate, int bitrate, int gop) {
-    rate->pictureRc = 1;
-    rate->mbRc = 1;
+static int stm_h264_alloc_chroma(stm_h264_t *ctx, const stm_h264_config_t *config) {
+    if (config->pixformat != PIXFORMAT_GRAYSCALE) {
+        return STM_H264_OK;
+    }
+
+    ctx->chroma_size = OMV_ALIGN_TO(((size_t) config->width * (size_t) config->height) / 2,
+                                    OMV_CACHE_LINE_SIZE);
+    ctx->chroma = uma_malign(ctx->chroma_size, OMV_CACHE_LINE_SIZE,
+                             UMA_PERSIST | UMA_CACHE | UMA_MAYBE);
+    if (!ctx->chroma) {
+        ctx->chroma_size = 0;
+        return STM_H264_MEMORY;
+    }
+
+    memset(ctx->chroma, STM_H264_NEUTRAL_CHROMA, ctx->chroma_size);
+    stm_h264_cache_clean(ctx->chroma, ctx->chroma_size);
+    ctx->grayscale = true;
+    return STM_H264_OK;
+}
+
+static void stm_h264_setup_rate_control(H264EncRateCtrl *rate, int bitrate, int gop, int qp) {
     rate->pictureSkip = 0;
     rate->hrd = 0;
-    rate->qpHdr = STM_H264_DEFAULT_QP;
-    rate->qpMin = STM_H264_MIN_QP;
-    rate->qpMax = STM_H264_MAX_QP;
     rate->bitPerSecond = bitrate;
     rate->gopLen = gop;
     rate->intraQpDelta = 0;
+    rate->fixedIntraQp = 0;
+    rate->mbQpAdjustment = 0;
+    rate->mbQpAutoBoost = 0;
+
+    if (qp >= STM_H264_MIN_USER_QP) {
+        rate->pictureRc = 0;
+        rate->mbRc = 0;
+        rate->qpHdr = qp;
+        rate->qpMin = qp;
+        rate->qpMax = qp;
+    } else {
+        rate->pictureRc = 1;
+        rate->mbRc = 1;
+        rate->qpHdr = STM_H264_DEFAULT_QP;
+        rate->qpMin = STM_H264_MIN_QP;
+        rate->qpMax = STM_H264_MAX_QP;
+    }
 }
 
 int stm_h264_init(stm_h264_t *ctx, const stm_h264_config_t *config) {
@@ -189,11 +248,12 @@ int stm_h264_init(stm_h264_t *ctx, const stm_h264_config_t *config) {
     }
 
     if (stm_h264_active) {
-        return STM_H264_ERROR;
+        return STM_H264_BUSY;
     }
 
     if ((config->width <= 0) || (config->height <= 0) ||
         (config->fps <= 0) || (config->fps > 300) ||
+        (config->qp < -1) || (config->qp > STM_H264_MAX_QP) ||
         (config->bitrate < STM_H264_MIN_BITRATE) ||
         (config->bitrate > STM_H264_MAX_BITRATE) ||
         (config->width % 4) || (config->height % 2)) {
@@ -208,6 +268,11 @@ int stm_h264_init(stm_h264_t *ctx, const stm_h264_config_t *config) {
     memset(ctx, 0, sizeof(*ctx));
     ctx->gop = (config->gop > 0) ? config->gop : config->fps;
     ctx->gop = OMV_MIN(OMV_MAX(ctx->gop, 1), 300);
+
+    error = stm_h264_alloc_chroma(ctx, config);
+    if (error != STM_H264_OK) {
+        return error;
+    }
 
     HAL_SYSCFG_EnableVENCRAMReserved();
     LL_VENC_Init();
@@ -278,7 +343,7 @@ int stm_h264_init(stm_h264_t *ctx, const stm_h264_config_t *config) {
         return stm_h264_ret_to_error(ret);
     }
 
-    stm_h264_setup_rate_control(&rate, config->bitrate, ctx->gop);
+    stm_h264_setup_rate_control(&rate, config->bitrate, ctx->gop, config->qp);
     ret = H264EncSetRateCtrl(ctx->inst, &rate);
     if (ret != H264ENC_OK) {
         stm_h264_deinit(ctx);
@@ -313,7 +378,7 @@ int stm_h264_encode(stm_h264_t *ctx, image_t *src,
     size_t src_size = image_size(src);
 
     enc_in.busLuma = (ptr_t) src->data;
-    enc_in.busChromaU = 0;
+    enc_in.busChromaU = (ctx->grayscale) ? (ptr_t) ctx->chroma : 0;
     enc_in.busChromaV = 0;
     enc_in.pOutBuf = (u32 *) frame_out;
     enc_in.busOutBuf = (ptr_t) frame_out;
@@ -325,6 +390,12 @@ int stm_h264_encode(stm_h264_t *ctx, image_t *src,
     enc_in.ltrf = H264ENC_NO_REFERENCE_NO_REFRESH;
     enc_in.lineBufWrCnt = 0;
     enc_in.sendAUD = 0;
+
+    if (ctx->grayscale) {
+        if (src->pixfmt != PIXFORMAT_GRAYSCALE || !ctx->chroma) {
+            return STM_H264_INVALID_ARGUMENT;
+        }
+    }
 
     stm_h264_cache_clean(src->data, src_size);
     stm_h264_cache_clean_invalidate(frame_out, frame_out_size);
@@ -364,7 +435,6 @@ int stm_h264_end(stm_h264_t *ctx, uint8_t *out, size_t out_size, size_t *out_len
         return stm_h264_ret_to_error(ret);
     }
 
-    stm_h264_cache_invalidate(out, enc_out.streamSize);
     *out_len = enc_out.streamSize;
     return STM_H264_OK;
 }
@@ -377,6 +447,13 @@ void stm_h264_deinit(stm_h264_t *ctx) {
     if (ctx->inst) {
         H264EncRelease(ctx->inst);
         ctx->inst = NULL;
+    }
+
+    if (ctx->chroma) {
+        uma_free(ctx->chroma);
+        ctx->chroma = NULL;
+        ctx->chroma_size = 0;
+        ctx->grayscale = false;
     }
 
     if (ctx->hw_initialized) {
@@ -393,6 +470,8 @@ const char *stm_h264_strerror(int error) {
     switch (error) {
         case STM_H264_OK:
             return "no error";
+        case STM_H264_ERROR:
+            return "H.264 encoder returned a generic error; check VENC hardware ID/support";
         case STM_H264_UNSUPPORTED:
             return "unsupported H.264 input pixel format";
         case STM_H264_OVERFLOW:
@@ -401,6 +480,32 @@ const char *stm_h264_strerror(int error) {
             return "H.264 encoder memory allocation failed";
         case STM_H264_INVALID_ARGUMENT:
             return "invalid H.264 encoder argument";
+        case STM_H264_NULL_ARGUMENT:
+            return "internal H.264 encoder null argument";
+        case STM_H264_EWL:
+            return "H.264 encoder wrapper layer error";
+        case STM_H264_INVALID_STATUS:
+            return "H.264 encoder was called in an invalid state";
+        case STM_H264_HW_BUS:
+            return "H.264 hardware bus access error";
+        case STM_H264_HW_DATA:
+            return "H.264 hardware data error";
+        case STM_H264_HW_TIMEOUT:
+            return "H.264 hardware timeout";
+        case STM_H264_HW_RESERVED:
+            return "H.264 hardware is busy";
+        case STM_H264_SYSTEM:
+            return "H.264 hardware system error";
+        case STM_H264_INSTANCE:
+            return "invalid H.264 encoder instance";
+        case STM_H264_HRD:
+            return "H.264 HRD rate-control error";
+        case STM_H264_HW_RESET:
+            return "H.264 hardware reset during encode";
+        case STM_H264_FUSE:
+            return "H.264 hardware feature is not available";
+        case STM_H264_BUSY:
+            return "H.264 encoder is already active";
         default:
             return "H.264 encoder error";
     }

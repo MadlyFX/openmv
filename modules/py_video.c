@@ -14,6 +14,7 @@
 #include "py/nlr.h"
 #include "py/mphal.h"
 #include "py/runtime.h"
+#include "extmod/vfs.h"
 #include "file_utils.h"
 #include "framebuffer.h"
 #include "omv_common.h"
@@ -46,6 +47,7 @@ typedef struct py_video_recorder {
     uint64_t bytes;
     int fps;
     int bitrate;
+    int qp;
     bool closed;
     bool recording;
     bool stream_was_enabled;
@@ -55,8 +57,17 @@ static void py_video_raise_csi_error(int error) {
     mp_raise_msg(&mp_type_RuntimeError, (mp_rom_error_text_t) omv_csi_strerror(error));
 }
 
-static void py_video_raise_h264_error(int error) {
-    mp_raise_msg(&mp_type_RuntimeError, (mp_rom_error_text_t) stm_h264_strerror(error));
+static void py_video_raise_h264_error(const char *operation, int error) {
+    mp_raise_msg_varg(&mp_type_RuntimeError,
+                      MP_ERROR_TEXT("H.264 %s failed: %s"),
+                      operation, stm_h264_strerror(error));
+}
+
+static void py_video_validate_output_path(const char *path) {
+    const char *path_out = path;
+    if (mp_vfs_lookup_path(path, &path_out) == MP_VFS_NONE) {
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("video output path is not mounted; check /sdcard or cwd"));
+    }
 }
 
 static void py_video_free_buffers(py_video_recorder_t *self) {
@@ -133,6 +144,7 @@ static mp_obj_t py_video_recorder_status_obj(py_video_recorder_t *self) {
     mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_bytes), mp_obj_new_int_from_ull(self->bytes));
     mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_fps), mp_obj_new_int(self->fps));
     mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_bitrate), mp_obj_new_int(self->bitrate));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_qp), mp_obj_new_int(self->qp));
     mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_closed), mp_obj_new_bool(self->closed));
     mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_recording), mp_obj_new_bool(self->recording));
     return dict;
@@ -207,7 +219,7 @@ static mp_obj_t py_video_recorder_record(size_t n_args, const mp_obj_t *pos_args
             omv_csi_recorder_release(self->csi);
 
             if (error < 0) {
-                py_video_raise_h264_error(error);
+                py_video_raise_h264_error("encode", error);
             }
 
             py_video_writer_write(self, self->out_buf, out_len);
@@ -252,7 +264,7 @@ static mp_obj_t py_video_recorder_close(mp_obj_t self_in) {
         size_t out_len = 0;
         int error = stm_h264_end(&self->h264, self->out_buf, self->out_size, &out_len);
         if (error < 0) {
-            py_video_raise_h264_error(error);
+            py_video_raise_h264_error("finalize", error);
         }
 
         if (out_len) {
@@ -281,6 +293,7 @@ static mp_obj_t py_video_recorder_make_new(const mp_obj_type_t *type,
         ARG_codec,
         ARG_fps,
         ARG_bitrate,
+        ARG_qp,
         ARG_gop,
         ARG_buffer_size,
         ARG_write_buffer,
@@ -291,6 +304,7 @@ static mp_obj_t py_video_recorder_make_new(const mp_obj_type_t *type,
         { MP_QSTR_codec,        MP_ARG_INT | MP_ARG_KW_ONLY,  {.u_int = PY_VIDEO_CODEC_H264} },
         { MP_QSTR_fps,          MP_ARG_INT | MP_ARG_KW_ONLY,  {.u_int = PY_VIDEO_DEFAULT_FPS} },
         { MP_QSTR_bitrate,      MP_ARG_INT | MP_ARG_KW_ONLY,  {.u_int = PY_VIDEO_DEFAULT_BITRATE} },
+        { MP_QSTR_qp,           MP_ARG_INT | MP_ARG_KW_ONLY,  {.u_int = -1} },
         { MP_QSTR_gop,          MP_ARG_INT | MP_ARG_KW_ONLY,  {.u_int = -1} },
         { MP_QSTR_buffer_size,  MP_ARG_INT | MP_ARG_KW_ONLY,  {.u_int = PY_VIDEO_DEFAULT_OUT_BUFFER} },
         { MP_QSTR_write_buffer, MP_ARG_INT | MP_ARG_KW_ONLY,  {.u_int = PY_VIDEO_DEFAULT_WRITE_BUFFER} },
@@ -314,6 +328,8 @@ static mp_obj_t py_video_recorder_make_new(const mp_obj_type_t *type,
 
     py_csi_obj_t *cam = MP_OBJ_TO_PTR(args[ARG_cam].u_obj);
     const char *path = mp_obj_str_get_str(args[ARG_path].u_obj);
+    py_video_validate_output_path(path);
+
     omv_csi_t *csi = cam->csi;
 
     if (!csi || !csi->fb) {
@@ -327,6 +343,7 @@ static mp_obj_t py_video_recorder_make_new(const mp_obj_type_t *type,
     self->closed = true;
     self->fps = args[ARG_fps].u_int;
     self->bitrate = args[ARG_bitrate].u_int;
+    self->qp = args[ARG_qp].u_int;
     self->out_size = args[ARG_buffer_size].u_int;
     self->write_size = args[ARG_write_buffer].u_int;
 
@@ -337,6 +354,17 @@ static mp_obj_t py_video_recorder_make_new(const mp_obj_type_t *type,
         mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("failed to allocate video buffers"));
     }
 
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        file_open(&self->fp, path, FA_WRITE | FA_CREATE_ALWAYS);
+        nlr_pop();
+    } else {
+        py_video_free_buffers(self);
+        nlr_jump(nlr.ret_val);
+    }
+
+    self->closed = false;
+
     int width = csi->fb->u ? csi->fb->u : csi->fb->w;
     int height = csi->fb->v ? csi->fb->v : csi->fb->h;
 
@@ -346,26 +374,17 @@ static mp_obj_t py_video_recorder_make_new(const mp_obj_type_t *type,
         .fps = self->fps,
         .bitrate = self->bitrate,
         .gop = args[ARG_gop].u_int,
+        .qp = self->qp,
         .pixformat = csi->pixformat,
     };
 
     int error = stm_h264_init(&self->h264, &config);
     if (error < 0) {
+        file_close(&self->fp);
+        self->closed = true;
         py_video_free_buffers(self);
-        py_video_raise_h264_error(error);
+        py_video_raise_h264_error("init", error);
     }
-
-    nlr_buf_t nlr;
-    if (nlr_push(&nlr) == 0) {
-        file_open(&self->fp, path, FA_WRITE | FA_CREATE_ALWAYS);
-        nlr_pop();
-    } else {
-        stm_h264_deinit(&self->h264);
-        py_video_free_buffers(self);
-        nlr_jump(nlr.ret_val);
-    }
-
-    self->closed = false;
 
     return MP_OBJ_FROM_PTR(self);
 }
