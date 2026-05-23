@@ -217,7 +217,9 @@ static int stm_h264_pack_luma_rgb888(const image_t *src, uint8_t *dst) {
         case PIXFORMAT_RGB565: {
             const uint16_t *rgb565 = (const uint16_t *) src->data;
             for (size_t i = 0; i < pixels; i++) {
-                *rgb++ = COLOR_Y_TO_RGB888(COLOR_RGB565_TO_Y(rgb565[i]));
+                uint16_t pixel = rgb565[i];
+                uint32_t y = COLOR_RGB565_TO_Y(pixel);
+                *rgb++ = COLOR_Y_TO_RGB888(y);
             }
             return STM_H264_OK;
         }
