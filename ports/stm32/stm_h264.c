@@ -25,7 +25,7 @@
 #define STM_H264_MIN_QP             (10)
 #define STM_H264_MIN_USER_QP        (0)
 #define STM_H264_MAX_QP             (51)
-#define STM_H264_NEUTRAL_CHROMA     (0x80)
+#define STM_H264_RGB888_BYTES_PER_PIXEL (4)
 
 static bool stm_h264_active = false;
 
@@ -115,7 +115,8 @@ static int stm_h264_ret_to_error(H264EncRet ret) {
 static int stm_h264_picture_type(pixformat_t pixformat, H264EncPictureType *type) {
     switch (pixformat) {
         case PIXFORMAT_GRAYSCALE:
-            *type = H264ENC_YUV422_INTERLEAVED_YUYV;
+            // ST's N6 H.264 reference path uses RGB888 input; expand grayscale into that mode.
+            *type = H264ENC_RGB888;
             return STM_H264_OK;
         case PIXFORMAT_RGB565:
             *type = H264ENC_RGB565;
@@ -195,8 +196,9 @@ static int stm_h264_alloc_input_scratch(stm_h264_t *ctx, const stm_h264_config_t
         return STM_H264_OK;
     }
 
-    ctx->input_scratch_size = OMV_ALIGN_TO((size_t) config->width * (size_t) config->height * 2,
-                                           OMV_CACHE_LINE_SIZE);
+    ctx->input_scratch_size =
+        OMV_ALIGN_TO((size_t) config->width * (size_t) config->height * STM_H264_RGB888_BYTES_PER_PIXEL,
+                     OMV_CACHE_LINE_SIZE);
     ctx->input_scratch = uma_malign(ctx->input_scratch_size, OMV_CACHE_LINE_SIZE,
                                     UMA_PERSIST | UMA_CACHE | UMA_MAYBE);
     if (!ctx->input_scratch) {
@@ -208,16 +210,14 @@ static int stm_h264_alloc_input_scratch(stm_h264_t *ctx, const stm_h264_config_t
     return STM_H264_OK;
 }
 
-static void stm_h264_pack_grayscale_yuyv(const image_t *src, uint8_t *dst) {
+static void stm_h264_pack_grayscale_rgb888(const image_t *src, uint8_t *dst) {
     const uint8_t *gray = src->data;
-    uint32_t *yuyv = (uint32_t *) dst;
+    uint32_t *rgb = (uint32_t *) dst;
     size_t pixels = (size_t) src->w * (size_t) src->h;
 
-    for (size_t i = 0; i < pixels; i += 2) {
-        *yuyv++ = ((uint32_t) STM_H264_NEUTRAL_CHROMA << 24) |
-                  ((uint32_t) gray[i + 1] << 16) |
-                  ((uint32_t) STM_H264_NEUTRAL_CHROMA << 8) |
-                  ((uint32_t) gray[i + 0]);
+    for (size_t i = 0; i < pixels; i++) {
+        uint32_t y = gray[i];
+        *rgb++ = (y << 16) | (y << 8) | y;
     }
 }
 
@@ -336,11 +336,6 @@ int stm_h264_init(stm_h264_t *ctx, const stm_h264_config_t *config) {
     }
 
     coding.idrHeader = 1;
-    coding.seiMessages = 0;
-    coding.videoFullRange = 1;
-    coding.enableCabac = 0;
-    coding.transform8x8Mode = 0;
-    coding.quarterPixelMv = 0;
 
     ret = H264EncSetCodingCtrl(ctx->inst, &coding);
     if (ret != H264ENC_OK) {
@@ -395,7 +390,7 @@ int stm_h264_encode(stm_h264_t *ctx, image_t *src,
             return STM_H264_INVALID_ARGUMENT;
         }
 
-        stm_h264_pack_grayscale_yuyv(src, ctx->input_scratch);
+        stm_h264_pack_grayscale_rgb888(src, ctx->input_scratch);
         stm_h264_cache_clean(ctx->input_scratch, ctx->input_scratch_size);
         input = ctx->input_scratch;
     }
@@ -519,7 +514,7 @@ const char *stm_h264_strerror(int error) {
         case STM_H264_HW_RESET:
             return "H.264 hardware reset during encode";
         case STM_H264_FUSE:
-            return "H.264 hardware feature is not available";
+            return "H.264 hardware rejected the selected encoding mode or input format";
         case STM_H264_BUSY:
             return "H.264 encoder is already active";
         default:
