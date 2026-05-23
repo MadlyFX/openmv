@@ -33,6 +33,7 @@ typedef enum {
     STM_H264_HW_RESET = -16,
     STM_H264_FUSE = -17,
     STM_H264_BUSY = -18,
+    STM_H264_RATE_UNSUPPORTED = -19,
 } stm_h264_error_t;
 
 typedef struct {

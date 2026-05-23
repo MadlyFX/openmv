@@ -26,6 +26,8 @@
 #define STM_H264_MIN_USER_QP        (0)
 #define STM_H264_MAX_QP             (51)
 #define STM_H264_RGB888_BYTES_PER_PIXEL (4)
+#define STM_H264_MAX_MB_PER_SECOND  (8160U * 15U)
+#define STM_H264_MB_SIZE            (16U)
 
 static bool stm_h264_active = false;
 
@@ -123,6 +125,12 @@ static int stm_h264_picture_type(pixformat_t pixformat, H264EncPictureType *type
         default:
             return STM_H264_UNSUPPORTED;
     }
+}
+
+static uint32_t stm_h264_macroblocks(int width, int height) {
+    uint32_t mb_width = ((uint32_t) width + STM_H264_MB_SIZE - 1U) / STM_H264_MB_SIZE;
+    uint32_t mb_height = ((uint32_t) height + STM_H264_MB_SIZE - 1U) / STM_H264_MB_SIZE;
+    return mb_width * mb_height;
 }
 
 static int stm_h264_append_padding(uint8_t *out, size_t out_size, size_t *out_len) {
@@ -288,6 +296,11 @@ int stm_h264_init(stm_h264_t *ctx, const stm_h264_config_t *config) {
     int error = stm_h264_picture_type(config->pixformat, &input_type);
     if (error != STM_H264_OK) {
         return error;
+    }
+
+    if (((uint64_t) stm_h264_macroblocks(config->width, config->height) *
+         (uint64_t) config->fps) > STM_H264_MAX_MB_PER_SECOND) {
+        return STM_H264_RATE_UNSUPPORTED;
     }
 
     memset(ctx, 0, sizeof(*ctx));
@@ -532,9 +545,11 @@ const char *stm_h264_strerror(int error) {
         case STM_H264_HW_RESET:
             return "H.264 hardware reset during encode";
         case STM_H264_FUSE:
-            return "H.264 hardware rejected the selected encoding mode or input format";
+            return "H.264 hardware rejected the selected encoding mode or input format; lower resolution/fps";
         case STM_H264_BUSY:
             return "H.264 encoder is already active";
+        case STM_H264_RATE_UNSUPPORTED:
+            return "requested H.264 resolution/fps exceeds STM32N6 VENC limit (about 1080p15 or 720p30)";
         default:
             return "H.264 encoder error";
     }
