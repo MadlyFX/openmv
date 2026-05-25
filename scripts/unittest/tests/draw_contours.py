@@ -1,16 +1,6 @@
 def unittest(data_path, temp_path):
     import image
 
-<<<<<<< HEAD
-    img = image.Image(9, 9, image.GRAYSCALE)
-
-    for y in range(1, 8):
-        for x in range(1, 8):
-            img.set_pixel((x, y), 255)
-    img.set_pixel((4, 4), 0)
-
-    img.draw_contours([(200, 255)], color=128, roi=(1, 1, 7, 7))
-=======
     def make_ring():
         img = image.Image(9, 9, image.GRAYSCALE)
         for y in range(1, 8):
@@ -32,7 +22,6 @@ def unittest(data_path, temp_path):
         return False
 
     img.draw_contours(blobs[0], color=128)
->>>>>>> codex/blob-contours
 
     outline = 0
     inside = 0
@@ -51,26 +40,6 @@ def unittest(data_path, temp_path):
                 return False
 
     direct_ok = (
-<<<<<<< HEAD
-        outline == 32
-        and inside == 16
-        and background == 33
-        and img.get_pixel((2, 2)) == 255
-        and img.get_pixel((3, 3)) == 128
-        and img.get_pixel((4, 4)) == 0
-    )
-
-    src = image.Image(9, 9, image.GRAYSCALE)
-    for y in range(1, 8):
-        for x in range(1, 8):
-            src.set_pixel((x, y), 255)
-    src.set_pixel((4, 4), 0)
-    src.set_pixel((0, 0), 255)
-
-    overlay = image.Image(9, 9, image.RGB565)
-    mask = image.Image(9, 9, image.BINARY)
-    overlay.draw_contours([(200, 255)], color=(255, 0, 0), image=src, mask=mask, seed=(2, 2))
-=======
         outline == 28
         and inside == 20
         and background == 33
@@ -93,7 +62,6 @@ def unittest(data_path, temp_path):
     overlay = image.Image(9, 9, image.RGB565)
     mask = image.Image(9, 9, image.BINARY)
     overlay.draw_contours(overlay_blob, color=(255, 0, 0), mask=mask)
->>>>>>> codex/blob-contours
 
     display = image.Image(9, 9, image.RGB565)
     display.draw_image(src, 0, 0)
@@ -109,19 +77,6 @@ def unittest(data_path, temp_path):
                 mask_count += 1
 
     overlay_ok = (
-<<<<<<< HEAD
-        overlay_count == 32
-        and mask_count == 32
-        and src.get_pixel((3, 3)) == 255
-        and mask.get_pixel((0, 0)) == 0
-        and overlay.get_pixel((0, 0)) == (0, 0, 0)
-        and overlay.get_pixel((2, 2)) == (0, 0, 0)
-        and display.get_pixel((2, 2)) == (255, 255, 255)
-        and display.get_pixel((3, 3)) == (255, 0, 0)
-    )
-
-    return direct_ok and overlay_ok
-=======
         overlay_count == 28
         and mask_count == 28
         and src.get_pixel((3, 3)) == 255
@@ -167,4 +122,3 @@ def unittest(data_path, temp_path):
                 merged_count += 1
 
     return direct_ok and overlay_ok and no_contour_ok and merged_count == 8
->>>>>>> codex/blob-contours
