@@ -40,10 +40,10 @@ def render_glyph(font, ch, width, height, threshold):
     bbox = font.getbbox(ch)
 
     if bbox is not None:
+        ascent, descent = font.getmetrics()
         glyph_w = bbox[2] - bbox[0]
-        glyph_h = bbox[3] - bbox[1]
         x = ((width - glyph_w) // 2) - bbox[0]
-        y = ((height - glyph_h) // 2) - bbox[1]
+        y = (height - (ascent + descent)) // 2
         draw.text((x, y), ch, fill=255, font=font)
 
     return image.point(lambda p: 255 if p >= threshold else 0)
