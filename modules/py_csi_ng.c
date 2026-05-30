@@ -938,7 +938,11 @@ static mp_obj_t py_csi_ioctl(size_t n_args, const mp_obj_t *args) {
 
         case OMV_CSI_IOCTL_SET_TRIGGERED_MODE:
         case OMV_CSI_IOCTL_SET_FOV_WIDE:
-        case OMV_CSI_IOCTL_SET_NIGHT_MODE: {
+        case OMV_CSI_IOCTL_SET_NIGHT_MODE:
+        #if (OMV_PS5520_ENABLE == 1)
+        case OMV_CSI_IOCTL_PS5520_SET_LTM_ENABLE:
+        #endif
+        {
             if (n_args == 1) {
                 error = omv_csi_ioctl(self->csi, request, mp_obj_get_int(args[0]));
             }
@@ -947,7 +951,11 @@ static mp_obj_t py_csi_ioctl(size_t n_args, const mp_obj_t *args) {
 
         case OMV_CSI_IOCTL_GET_TRIGGERED_MODE:
         case OMV_CSI_IOCTL_GET_FOV_WIDE:
-        case OMV_CSI_IOCTL_GET_NIGHT_MODE: {
+        case OMV_CSI_IOCTL_GET_NIGHT_MODE:
+        #if (OMV_PS5520_ENABLE == 1)
+        case OMV_CSI_IOCTL_PS5520_GET_LTM_ENABLE:
+        #endif
+        {
             int enabled;
             error = omv_csi_ioctl(self->csi, request, &enabled);
             if (error == 0) {
@@ -1581,6 +1589,11 @@ static const mp_rom_map_elem_t globals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_IOCTL_HIMAX_OSC_ENABLE),      MP_ROM_INT(OMV_CSI_IOCTL_HIMAX_OSC_ENABLE) },
     #endif
     { MP_ROM_QSTR(MP_QSTR_IOCTL_GET_RGB_STATS),         MP_ROM_INT(OMV_CSI_IOCTL_GET_RGB_STATS) },
+
+    #if (OMV_PS5520_ENABLE == 1)
+    { MP_ROM_QSTR(MP_QSTR_IOCTL_PS5520_SET_LTM_ENABLE), MP_ROM_INT(OMV_CSI_IOCTL_PS5520_SET_LTM_ENABLE) },
+    { MP_ROM_QSTR(MP_QSTR_IOCTL_PS5520_GET_LTM_ENABLE), MP_ROM_INT(OMV_CSI_IOCTL_PS5520_GET_LTM_ENABLE) },
+    #endif
 
     #if (OMV_GENX320_ENABLE == 1)
     { MP_ROM_QSTR(MP_QSTR_IOCTL_GENX320_SET_BIASES),     MP_ROM_INT(OMV_CSI_IOCTL_GENX320_SET_BIASES) },

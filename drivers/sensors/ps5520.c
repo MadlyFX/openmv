@@ -58,6 +58,12 @@
 #define CMD_NP                  (0xAB)
 #define R_ISP_TESTMODE          (0x92)
 #define SENSOR_UPDATE           (0x09)
+// Bank #6
+#define BANK_LTM                (0x06)
+#define CMD_LTM_BACKLIGHT       (0x99)
+#define CMD_LTM                 (0x9A)
+#define CMD_LTM_UPD             (0xF1)
+#define LTM_UPD_EN              (0x01)
 
 #define PIX_CLK                 (160000000L)
 
@@ -95,6 +101,9 @@
 #define PS5520_L_AEC_ROOM_DIV   (10)
 #define PS5520_L_AEC_DIFF_MUL   (10)
 #define PS5520_L_AEC_MAX_STEP   (50)
+#define PS5520_LTM_DEFAULT       (0x88)
+#define PS5520_BACKLIGHT_DEFAULT (0x23)
+#define PS5520_LTM_DISABLED      (0x00)
 
 typedef struct ps5520_state {
     bool enable_agc;
@@ -104,6 +113,7 @@ typedef struct ps5520_state {
     int32_t aec_exposure;
     int32_t aec_exposure_ceiling;
     int g_div;
+    bool ltm_enabled;
 } ps5520_state_t;
 
 static ps5520_state_t ps5520_state = {};
@@ -1136,6 +1146,7 @@ static exp_tbl_t gu16ExpTbl[] = {
 
 static int write_registers(omv_csi_t *csi, const uint8_t(*regs)[2]);
 static int get_exposure_us(omv_csi_t *csi, int *exposure_us);
+static int set_ltm_enable(omv_csi_t *csi, bool enable);
 
 static int reset(omv_csi_t *csi) {
     ps5520_state_t *ps5520 = csi->priv;
@@ -1156,6 +1167,7 @@ static int reset(omv_csi_t *csi) {
     ps5520->aec_exposure_ceiling = PS5520_DEF_EXP_CEILING;
 
     ps5520->g_div = 1;
+    ps5520->ltm_enabled = true;
 
     ret |= omv_i2c_read_reg(csi->i2c, csi->slv_addr, CMD_LPF_H, 1, &exposure_line_h, 1);
     ret |= omv_i2c_read_reg(csi->i2c, csi->slv_addr, CMD_LPF_L, 1, &exposure_line_l, 1);
@@ -1241,6 +1253,7 @@ static int set_pixformat(omv_csi_t *csi, pixformat_t pixformat) {
 }
 
 static int set_framesize(omv_csi_t *csi, omv_csi_framesize_t framesize) {
+    ps5520_state_t *ps5520 = csi->priv;
     int ret = 0;
     const uint8_t(*regs)[2];
 
@@ -1272,6 +1285,11 @@ static int set_framesize(omv_csi_t *csi, omv_csi_framesize_t framesize) {
 
     // Set resolution
     ret |= write_registers(csi, regs);
+
+    if ((ret == 0) && !ps5520->ltm_enabled) {
+        ret |= set_ltm_enable(csi, false);
+    }
+
     return ret;
 }
 
@@ -1500,6 +1518,24 @@ static int set_vflip(omv_csi_t *csi, int enable) {
     return ret;
 }
 
+static int set_ltm_enable(omv_csi_t *csi, bool enable) {
+    ps5520_state_t *ps5520 = csi->priv;
+    int ret = omv_i2c_write_reg(csi->i2c, csi->slv_addr, REG_BANK, 1, BANK_LTM, 1);
+
+    ret |= omv_i2c_write_reg(csi->i2c, csi->slv_addr, CMD_LTM_BACKLIGHT, 1,
+                             enable ? PS5520_BACKLIGHT_DEFAULT : PS5520_LTM_DISABLED, 1);
+    ret |= omv_i2c_write_reg(csi->i2c, csi->slv_addr, CMD_LTM, 1,
+                             enable ? PS5520_LTM_DEFAULT : PS5520_LTM_DISABLED, 1);
+    ret |= omv_i2c_write_reg(csi->i2c, csi->slv_addr, CMD_LTM_UPD, 1, LTM_UPD_EN, 1);
+    ret |= omv_i2c_write_reg(csi->i2c, csi->slv_addr, REG_BANK, 1, 0x01, 1);
+
+    if (ret == 0) {
+        ps5520->ltm_enabled = enable;
+    }
+
+    return ret;
+}
+
 static int update_agc_aec(omv_csi_t *csi, int luminance) {
     ps5520_state_t *ps5520 = csi->priv;
     int ret = 0;
@@ -1602,6 +1638,14 @@ static int ioctl(omv_csi_t *csi, int request, va_list ap) {
     int ret = 0;
 
     switch (request) {
+        case OMV_CSI_IOCTL_PS5520_SET_LTM_ENABLE:
+            ret = set_ltm_enable(csi, va_arg(ap, int));
+            break;
+        case OMV_CSI_IOCTL_PS5520_GET_LTM_ENABLE: {
+            int *enabled = va_arg(ap, int *);
+            *enabled = ((ps5520_state_t *) csi->priv)->ltm_enabled;
+            break;
+        }
         case OMV_CSI_IOCTL_UPDATE_AGC_AEC:
             ret = update_agc_aec(csi, va_arg(ap, int));
             break;
@@ -1615,6 +1659,7 @@ static int ioctl(omv_csi_t *csi, int request, va_list ap) {
 
 int ps5520_init(omv_csi_t *csi) {
     csi->priv = &ps5520_state;
+    ps5520_state.ltm_enabled = true;
 
     // Initialize csi flags.
     csi->vsync_pol = 0;
