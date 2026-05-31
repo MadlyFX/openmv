@@ -206,6 +206,25 @@ static uint8_t stm_csi_raw_window_pixel(uint16_t pixel, uint16_t low, uint16_t h
     return ((pixel - low) * UINT8_MAX) / range;
 }
 
+static uint16_t stm_csi_raw10_window_sample(const uint16_t *row, uint32_t x) {
+    // DCMIPP Pipe0 expands RAW10 to 16-bit words with the sample in bits 9:0.
+    return row[x] & 0x03FF;
+}
+
+static pixformat_t stm_csi_raw_window_bayer_pixfmt(omv_csi_t *csi, framebuffer_t *fb) {
+    pixformat_t pixfmt = PIXFORMAT_BAYER_BGGR;
+
+    if (csi->cfa_format == SUBFORMAT_ID_GBRG) {
+        pixfmt = PIXFORMAT_BAYER_GBRG;
+    } else if (csi->cfa_format == SUBFORMAT_ID_GRBG) {
+        pixfmt = PIXFORMAT_BAYER_GRBG;
+    } else if (csi->cfa_format == SUBFORMAT_ID_RGGB) {
+        pixfmt = PIXFORMAT_BAYER_RGGB;
+    }
+
+    return imlib_bayer_shift(pixfmt, fb->x, fb->y, false);
+}
+
 static void stm_csi_raw10_window_to_8(const uint8_t *src, uint8_t *dst,
                                       uint32_t width, uint32_t height,
                                       uint32_t line_bytes, uint16_t low, uint16_t high) {
@@ -214,8 +233,7 @@ static void stm_csi_raw10_window_to_8(const uint8_t *src, uint8_t *dst,
         uint8_t *out = dst + (y * width);
 
         for (uint32_t x = 0; x < width; x++) {
-            // DCMIPP Pipe0 expands RAW10 to 16-bit LSB-aligned words.
-            out[x] = stm_csi_raw_window_pixel(row[x] & 0x03FF, low, high);
+            out[x] = stm_csi_raw_window_pixel(stm_csi_raw10_window_sample(row, x), low, high);
         }
     }
 }
@@ -275,6 +293,10 @@ static int stm_csi_raw_window_snapshot(omv_csi_t *csi, image_t *image, uint32_t 
     csi->raw_window_error = false;
     csi->raw_window_active = true;
 
+    #ifdef __DCACHE_PRESENT
+    SCB_CleanInvalidateDCache_by_Addr(csi->raw_window_buffer, csi->raw_window_buffer_size);
+    #endif
+
     if (HAL_DCMIPP_CSI_PIPE_Start(&csi->dcmipp, DCMIPP_PIPE0, DCMIPP_VIRTUAL_CHANNEL0,
                                   (uint32_t) csi->raw_window_buffer, DCMIPP_MODE_SNAPSHOT) != HAL_OK) {
         csi->raw_window_active = false;
@@ -312,20 +334,32 @@ static int stm_csi_raw_window_snapshot(omv_csi_t *csi, image_t *image, uint32_t 
                               fb->u, fb->v, line_bytes,
                               csi->raw_window_low, csi->raw_window_high);
 
-    // Release the buffer from free queue -> used queue.
-    framebuffer_release(fb, FB_FLAG_FREE | FB_FLAG_CHECK_LAST);
-
     fb->w = fb->u;
     fb->h = fb->v;
     fb->size = fb->w * fb->h;
 
     if (csi->pixformat == PIXFORMAT_BAYER) {
-        fb->pixfmt = PIXFORMAT_BAYER;
-        fb->subfmt_id = csi->cfa_format;
-        fb->pixfmt = imlib_bayer_shift(fb->pixfmt, fb->x, fb->y, false);
+        fb->pixfmt = stm_csi_raw_window_bayer_pixfmt(csi, fb);
     } else {
+        image_t src = {
+            .w = fb->w,
+            .h = fb->h,
+            .pixfmt = stm_csi_raw_window_bayer_pixfmt(csi, fb),
+            .data = buffer->data,
+        };
+        image_t dst = {
+            .w = fb->w,
+            .h = fb->h,
+            .pixfmt = PIXFORMAT_GRAYSCALE,
+            .data = csi->raw_window_buffer,
+        };
+        imlib_debayer_image(&dst, &src);
+        memcpy(buffer->data, csi->raw_window_buffer, fb->size);
         fb->pixfmt = PIXFORMAT_GRAYSCALE;
     }
+
+    // Release the buffer from free queue -> used queue.
+    framebuffer_release(fb, FB_FLAG_FREE | FB_FLAG_CHECK_LAST);
 
     framebuffer_to_image(fb, image);
     return 0;

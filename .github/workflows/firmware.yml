@@ -1,37 +1,37 @@
-name: '🔥 Firmware Build'
+name: "🔥 Firmware Build"
 
 on:
   push:
     tags:
-      - 'v*.*.*'
-    branches:    
-      - 'master'
+      - "v*.*.*"
+    branches:
+      - "master"
     paths:
-      - '**'
-      - '.github/workflows/*.yml'
-      - '.github/workflows/*.json'
-      - '!**.md'
-      - '!**.rst'
-      - '!**.md'
-      - '!cubeai**'
-      - '!scripts/examples**'
-      - 'scripts/libraries/**'
-      - 'scripts/unittest/**'
+      - "**"
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.json"
+      - "!**.md"
+      - "!**.rst"
+      - "!**.md"
+      - "!cubeai**"
+      - "!scripts/examples**"
+      - "scripts/libraries/**"
+      - "scripts/unittest/**"
 
   pull_request:
     branches:
-      - 'master'
+      - "master"
     paths:
-      - '**'
-      - '.github/workflows/*.yml'
-      - '.github/workflows/*.json'
-      - '!**.md'
-      - '!**.rst'
-      - '!**.md'
-      - '!cubeai**'
-      - '!scripts/examples**'
-      - 'scripts/libraries/**'
-      - 'scripts/unittest/**'
+      - "**"
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.json"
+      - "!**.md"
+      - "!**.rst"
+      - "!**.md"
+      - "!cubeai**"
+      - "!scripts/examples**"
+      - "scripts/libraries/**"
+      - "scripts/unittest/**"
 
 jobs:
   build-firmware:
@@ -40,17 +40,7 @@ jobs:
     strategy:
       matrix:
         target:
-          - OPENMV2
-          - OPENMV3
-          - OPENMV4
-          - OPENMV4P
-          - OPENMVPT
-          - OPENMV_RT1060
-          - OPENMV_AE3
           - OPENMV_N6
-          - ARDUINO_PORTENTA_H7
-          - ARDUINO_GIGA
-          - ARDUINO_NICLA_VISION
         qemu: [false]
         fvp: [false]
         profile: [0]
@@ -75,156 +65,156 @@ jobs:
             artifacts: false
       fail-fast: false
     steps:
-    - name: '⏳ Checkout repository'
-      uses: actions/checkout@v6
-      with:
-        submodules: false
+      - name: "⏳ Checkout repository"
+        uses: actions/checkout@v6
+        with:
+          submodules: false
 
-    - name: '🧱 Update submodules'
-      run: source tools/ci.sh && ci_update_submodules
+      - name: "🧱 Update submodules"
+        run: source tools/ci.sh && ci_update_submodules
 
-    - name: 'Read SDK version'
-      id: sdk-ver
-      run: echo "version=$(cat SDK_VERSION)" >> "$GITHUB_OUTPUT"
+      - name: "Read SDK version"
+        id: sdk-ver
+        run: echo "version=$(cat SDK_VERSION)" >> "$GITHUB_OUTPUT"
 
-    - name: '♻ Cache SDK'
-      uses: actions/cache@v5.0.3
-      id: sdk-cache
-      with:
-        path: ~/openmv-sdk-${{ steps.sdk-ver.outputs.version }}
-        key: openmv-sdk-${{ steps.sdk-ver.outputs.version }}-linux-x86_64
+      - name: "♻ Cache SDK"
+        uses: actions/cache@v5.0.3
+        id: sdk-cache
+        with:
+          path: ~/openmv-sdk-${{ steps.sdk-ver.outputs.version }}
+          key: openmv-sdk-${{ steps.sdk-ver.outputs.version }}-linux-x86_64
 
-    - name: '🛠 Install dependencies'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y qemu-system-arm
+      - name: "🛠 Install dependencies"
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-arm
 
-    - name: '🛠 Install SDK'
-      if: steps.sdk-cache.outputs.cache-hit != 'true'
-      run: source tools/ci.sh && ci_install_sdk
+      - name: "🛠 Install SDK"
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        run: source tools/ci.sh && ci_install_sdk
 
-    - name: '♻ Cache FVP'
-      if: matrix.fvp
-      uses: actions/cache@v5.0.3
-      id: fvp-cache
-      with:
-        path: ~/fvp-11.31.28
-        key: fvp-11.31.28-linux-x86_64
+      - name: "♻ Cache FVP"
+        if: matrix.fvp
+        uses: actions/cache@v5.0.3
+        id: fvp-cache
+        with:
+          path: ~/fvp-11.31.28
+          key: fvp-11.31.28-linux-x86_64
 
-    - name: '🛠 Install FVP'
-      if: matrix.fvp && steps.fvp-cache.outputs.cache-hit != 'true'
-      run: source tools/ci.sh && ci_install_fvp
+      - name: "🛠 Install FVP"
+        if: matrix.fvp && steps.fvp-cache.outputs.cache-hit != 'true'
+        run: source tools/ci.sh && ci_install_fvp
 
-    - name: '🏗 Build firmware'
-      run: source tools/ci.sh && ci_build_target ${{ matrix.target }} ${{ matrix.qemu }} ${{ matrix.profile }} ${{ matrix.artifacts }}
+      - name: "🏗 Build firmware"
+        run: source tools/ci.sh && ci_build_target ${{ matrix.target }} ${{ matrix.qemu }} ${{ matrix.profile }} ${{ matrix.artifacts }}
 
-    - name: '🧪 Run QEMU tests'
-      if: matrix.qemu
-      run: source tools/ci.sh && ci_run_qemu_tests ${{ matrix.target }}
+      - name: "🧪 Run QEMU tests"
+        if: matrix.qemu
+        run: source tools/ci.sh && ci_run_qemu_tests ${{ matrix.target }}
 
-    - name: '🧪 Run FVP tests'
-      if: matrix.fvp
-      run: source tools/ci.sh && ci_run_fvp_tests ${{ matrix.target }}
+      - name: "🧪 Run FVP tests"
+        if: matrix.fvp
+        run: source tools/ci.sh && ci_run_fvp_tests ${{ matrix.target }}
 
-    - name: '⬆ Upload artifacts'
-      if: matrix.artifacts
-      uses: actions/upload-artifact@v7
-      with:
-        name: ${{ matrix.target }}
-        path: ${{ matrix.target }}
-        if-no-files-found: error
+      - name: "⬆ Upload artifacts"
+        if: matrix.artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.target }}
+          path: ${{ matrix.target }}
+          if-no-files-found: error
 
   code-size-report:
     needs: build-firmware
     runs-on: ubuntu-24.04
     if: github.event_name == 'pull_request'
     steps:
-    - name: '⏳ Checkout repository'
-      uses: actions/checkout@v6
-      with:
-        submodules: false
+      - name: "⏳ Checkout repository"
+        uses: actions/checkout@v6
+        with:
+          submodules: false
 
-    - name: '♻ Cache SDK'
-      uses: actions/cache@v5.0.3
-      id: sdk-cache
-      with:
-        path: ~/openmv-sdk-1.0.0
-        key: openmv-sdk-1.0.0-linux-x86_64
+      - name: "♻ Cache SDK"
+        uses: actions/cache@v5.0.3
+        id: sdk-cache
+        with:
+          path: ~/openmv-sdk-1.0.0
+          key: openmv-sdk-1.0.0-linux-x86_64
 
-    - name: '🛠 Install SDK'
-      if: steps.sdk-cache.outputs.cache-hit != 'true'
-      run: source tools/ci.sh && ci_install_sdk
+      - name: "🛠 Install SDK"
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        run: source tools/ci.sh && ci_install_sdk
 
-    - name: '↓ Download artifacts'
-      uses: actions/download-artifact@v8
-      with:
-        path: new_firmware
-        merge-multiple: false
+      - name: "↓ Download artifacts"
+        uses: actions/download-artifact@v8
+        with:
+          path: new_firmware
+          merge-multiple: false
 
-    - name: '↓ Download release'
-      uses: robinraju/release-downloader@v1
-      with:
-        repository: 'openmv/openmv'
-        tag: 'development'
-        fileName: '*.zip'
-        extract: false
-        out-file-path: 'old_firmware'
+      - name: "↓ Download release"
+        uses: robinraju/release-downloader@v1
+        with:
+          repository: "openmv/openmv"
+          tag: "development"
+          fileName: "*.zip"
+          extract: false
+          out-file-path: "old_firmware"
 
-    - name: '📝 Generate report'
-      run: |
-        SDK_DIR="${HOME}/openmv-sdk-1.0.0"
-        export PATH="${SDK_DIR}/gcc/bin:${SDK_DIR}/python/bin:${PATH}"
-        python3 tools/code_size.py > ${GITHUB_WORKSPACE}/${{ github.event.pull_request.number }}.md
+      - name: "📝 Generate report"
+        run: |
+          SDK_DIR="${HOME}/openmv-sdk-1.0.0"
+          export PATH="${SDK_DIR}/gcc/bin:${SDK_DIR}/python/bin:${PATH}"
+          python3 tools/code_size.py > ${GITHUB_WORKSPACE}/${{ github.event.pull_request.number }}.md
 
-    - name: '⬆ Upload report'
-      uses: actions/upload-artifact@v7
-      with:
-        overwrite: true
-        name: code-size-report
-        path: ${{ github.event.pull_request.number }}.md
-        if-no-files-found: error
+      - name: "⬆ Upload report"
+        uses: actions/upload-artifact@v7
+        with:
+          overwrite: true
+          name: code-size-report
+          path: ${{ github.event.pull_request.number }}.md
+          if-no-files-found: error
 
   stable-release:
     needs: build-firmware
     runs-on: ubuntu-24.04
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     steps:
-    - name: '⏳ Checkout repository'
-      uses: actions/checkout@v6
-      with:
-        submodules: false
+      - name: "⏳ Checkout repository"
+        uses: actions/checkout@v6
+        with:
+          submodules: false
 
-    - name: '↓ Download artifacts'
-      uses: actions/download-artifact@v8
-      with:
-        path: firmware
+      - name: "↓ Download artifacts"
+        uses: actions/download-artifact@v8
+        with:
+          path: firmware
 
-    - name: '📦 Package firmware'
-      run: source tools/ci.sh && ci_package_firmware_release ${{github.ref_name}}
+      - name: "📦 Package firmware"
+        run: source tools/ci.sh && ci_package_firmware_release ${{github.ref_name}}
 
-    - name: "✏️ Generate release changelog"
-      id: changelog
-      uses: mikepenz/release-changelog-builder-action@v6
-      with:
-        toTag: ${{ github.sha }}
-        configuration: '.github/workflows/changelog.json'
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: "✏️ Generate release changelog"
+        id: changelog
+        uses: mikepenz/release-changelog-builder-action@v6
+        with:
+          toTag: ${{ github.sha }}
+          configuration: ".github/workflows/changelog.json"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: '🔥 Create stable release'
-      uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda
-      with:
-        draft: true
-        files: firmware_*.zip
-        body: ${{steps.changelog.outputs.changelog}}
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: "🔥 Create stable release"
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda
+        with:
+          draft: true
+          files: firmware_*.zip
+          body: ${{steps.changelog.outputs.changelog}}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: '🧹 Remove artifacts'
-      uses: geekyeggo/delete-artifact@v6
-      with:
-        name: firmware
-        failOnError: false
+      - name: "🧹 Remove artifacts"
+        uses: geekyeggo/delete-artifact@v6
+        with:
+          name: firmware
+          failOnError: false
 
   development-release:
     needs: build-firmware
@@ -233,51 +223,51 @@ jobs:
     permissions:
       contents: write
     steps:
-    - name: '⏳ Checkout repository'
-      uses: actions/checkout@v6
-      with:
-        submodules: false
+      - name: "⏳ Checkout repository"
+        uses: actions/checkout@v6
+        with:
+          submodules: false
 
-    - name: '↓ Download artifacts'
-      uses: actions/download-artifact@v8
-      with:
-        path: firmware
+      - name: "↓ Download artifacts"
+        uses: actions/download-artifact@v8
+        with:
+          path: firmware
 
-    - name: '📦 Package firmware'
-      run: source tools/ci.sh && ci_package_firmware_development
+      - name: "📦 Package firmware"
+        run: source tools/ci.sh && ci_package_firmware_development
 
-    - name: '🧹 Delete old release'
-      uses: dev-drprasad/delete-tag-and-release@v1.1
-      with:
-        delete_release: true
-        tag_name: development
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: "🧹 Delete old release"
+        uses: dev-drprasad/delete-tag-and-release@v1.1
+        with:
+          delete_release: true
+          tag_name: development
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: "✏️ Generate release changelog"
-      id: changelog
-      uses: mikepenz/release-changelog-builder-action@v6
-      with:
-        toTag: ${{ github.sha }}
-        configuration: '.github/workflows/changelog.json'
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: "✏️ Generate release changelog"
+        id: changelog
+        uses: mikepenz/release-changelog-builder-action@v6
+        with:
+          toTag: ${{ github.sha }}
+          configuration: ".github/workflows/changelog.json"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: '🔥 Create development release'
-      uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda
-      with:
-        draft: false
-        name: Development Release
-        tag_name: development
-        body: |
+      - name: "🔥 Create development release"
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda
+        with:
+          draft: false
+          name: Development Release
+          tag_name: development
+          body: |
             **⚠️ This is a development release, and it may be unstable.**
             ${{steps.changelog.outputs.changelog}}
-        files: firmware/firmware_*.zip
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          files: firmware/firmware_*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: '🧹 Remove artifacts'
-      uses: geekyeggo/delete-artifact@v6
-      with:
-        name: firmware
-        failOnError: false
+      - name: "🧹 Remove artifacts"
+        uses: geekyeggo/delete-artifact@v6
+        with:
+          name: firmware
+          failOnError: false
