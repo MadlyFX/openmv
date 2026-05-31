@@ -299,6 +299,8 @@ __weak int omv_csi_reset(omv_csi_t *csi, bool hard) {
         omv_csi_abort(csi, true, false);
     }
 
+    bool raw_window_was_enabled = csi->raw_window_enabled;
+
     // Reset the csi state
     csi->sde = 0;
     csi->pixformat = 0;
@@ -319,6 +321,9 @@ __weak int omv_csi_reset(omv_csi_t *csi, bool hard) {
     #endif // MICROPY_PY_IMU
     csi->color_palette = rainbow_table;
     csi->disable_full_flush = false;
+    csi->raw_window_enabled = false;
+    csi->raw_window_low = 0;
+    csi->raw_window_high = 0;
     csi->recorder_active = false;
     csi->recorder_drop_frames = false;
     csi->recorder_dropped_frames = 0;
@@ -329,6 +334,10 @@ __weak int omv_csi_reset(omv_csi_t *csi, bool hard) {
     csi->frame_cb = (omv_csi_cb_t) {
         NULL, NULL
     };
+
+    if (raw_window_was_enabled) {
+        omv_csi_config(csi, OMV_CSI_CONFIG_RAW_WINDOW);
+    }
 
     #if defined(OMV_CSI_STATS_ENABLE)
     // Enable collecting RGB stats.
@@ -793,6 +802,12 @@ __weak int omv_csi_set_pixformat(omv_csi_t *csi, pixformat_t pixformat) {
         return OMV_CSI_ERROR_PIXFORMAT_UNSUPPORTED;
     }
 
+    if (csi->raw_window_enabled &&
+        (pixformat != PIXFORMAT_GRAYSCALE) &&
+        (pixformat != PIXFORMAT_BAYER)) {
+        return OMV_CSI_ERROR_PIXFORMAT_UNSUPPORTED;
+    }
+
     // Disable any ongoing frame capture.
     omv_csi_abort(csi, true, false);
 
@@ -979,6 +994,60 @@ __weak int omv_csi_set_windowing(omv_csi_t *csi, int x, int y, int w, int h) {
 
     // Reconfigure the hardware if needed.
     return omv_csi_config(csi, OMV_CSI_CONFIG_WINDOWING);
+}
+
+__weak int omv_csi_set_raw_window(omv_csi_t *csi, int enable, uint16_t low, uint16_t high) {
+    if (enable) {
+        if (!csi->raw_output) {
+            return OMV_CSI_ERROR_CTL_UNSUPPORTED;
+        }
+
+        if ((low >= high) || (high > 1023)) {
+            return OMV_CSI_ERROR_INVALID_ARGUMENT;
+        }
+
+        if ((csi->pixformat != PIXFORMAT_GRAYSCALE) &&
+            (csi->pixformat != PIXFORMAT_BAYER)) {
+            return OMV_CSI_ERROR_PIXFORMAT_UNSUPPORTED;
+        }
+
+        if (csi->transpose || csi->auto_rotation) {
+            return OMV_CSI_ERROR_PIXFORMAT_UNSUPPORTED;
+        }
+    }
+
+    if ((csi->raw_window_enabled == (enable != 0)) &&
+        (!enable || ((csi->raw_window_low == low) && (csi->raw_window_high == high)))) {
+        return 0;
+    }
+
+    // Disable any ongoing frame capture.
+    omv_csi_abort(csi, true, false);
+
+    csi->raw_window_enabled = (enable != 0);
+    csi->raw_window_low = low;
+    csi->raw_window_high = high;
+
+    // Reset pixel format to skip stale frames from the previous mapping.
+    csi->fb->pixfmt = PIXFORMAT_INVALID;
+
+    return omv_csi_config(csi, OMV_CSI_CONFIG_RAW_WINDOW);
+}
+
+__weak int omv_csi_get_raw_window(omv_csi_t *csi, bool *enabled, uint16_t *low, uint16_t *high) {
+    if (enabled != NULL) {
+        *enabled = csi->raw_window_enabled;
+    }
+
+    if (low != NULL) {
+        *low = csi->raw_window_low;
+    }
+
+    if (high != NULL) {
+        *high = csi->raw_window_high;
+    }
+
+    return 0;
 }
 
 __weak int omv_csi_set_contrast(omv_csi_t *csi, int level) {
@@ -1303,7 +1372,8 @@ __weak int omv_csi_set_transpose(omv_csi_t *csi, bool enable) {
     // Disable any ongoing frame capture.
     omv_csi_abort(csi, true, false);
 
-    if ((csi->pixformat == PIXFORMAT_YUV422) || (csi->pixformat == PIXFORMAT_JPEG)) {
+    if ((csi->pixformat == PIXFORMAT_YUV422) || (csi->pixformat == PIXFORMAT_JPEG) ||
+        (enable && csi->raw_window_enabled)) {
         return OMV_CSI_ERROR_PIXFORMAT_UNSUPPORTED;
     }
 
@@ -1327,7 +1397,8 @@ __weak int omv_csi_set_auto_rotation(omv_csi_t *csi, bool enable) {
     omv_csi_abort(csi, true, false);
 
     // Operation not supported on JPEG images.
-    if ((csi->pixformat == PIXFORMAT_YUV422) || (csi->pixformat == PIXFORMAT_JPEG)) {
+    if ((csi->pixformat == PIXFORMAT_YUV422) || (csi->pixformat == PIXFORMAT_JPEG) ||
+        (enable && csi->raw_window_enabled)) {
         return OMV_CSI_ERROR_PIXFORMAT_UNSUPPORTED;
     }
 

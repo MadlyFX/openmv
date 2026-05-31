@@ -149,10 +149,15 @@ typedef I2C_HandleTypeDef *omv_i2c_dev_t;
 
 
 #if defined(STM32N6)
-#define OMV_CSI_PORT_BITS_DCMIPP     \
-    struct {                         \
-        DCMIPP_HandleTypeDef dcmipp; \
-        DMA_QListTypeDef dma_queue;  \
+#define OMV_CSI_PORT_BITS_DCMIPP          \
+    struct {                              \
+        DCMIPP_HandleTypeDef dcmipp;      \
+        DMA_QListTypeDef dma_queue;       \
+        uint8_t *raw_window_buffer;       \
+        uint32_t raw_window_buffer_size;  \
+        volatile bool raw_window_active;  \
+        volatile bool raw_window_done;    \
+        volatile bool raw_window_error;   \
     };
 #else
 #define OMV_CSI_PORT_BITS_DCMIPP

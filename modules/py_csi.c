@@ -374,6 +374,65 @@ static mp_obj_t py_omv_csi_get_windowing() {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(py_omv_csi_get_windowing_obj, py_omv_csi_get_windowing);
 
+static mp_obj_t py_omv_csi_set_raw_window(size_t n_args, const mp_obj_t *args) {
+    omv_csi_t *csi = omv_csi_get(-1);
+
+    if ((n_args == 0) || (args[0] == mp_const_none)) {
+        int error = omv_csi_set_raw_window(csi, false, 0, 0);
+        if (error != 0) {
+            omv_csi_raise_error(error);
+        }
+        return mp_const_none;
+    }
+
+    mp_obj_t *array = (mp_obj_t *) args;
+    mp_uint_t array_len = n_args;
+
+    if (n_args == 1) {
+        mp_obj_get_array(args[0], &array_len, &array);
+    }
+
+    if (array_len != 2) {
+        mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("Expected (low, high) tuple/list."));
+    }
+
+    int low = mp_obj_get_int(array[0]);
+    int high = mp_obj_get_int(array[1]);
+
+    if ((low < 0) || (high < 0) || (high > 1023) || (low >= high)) {
+        omv_csi_raise_error(OMV_CSI_ERROR_INVALID_ARGUMENT);
+    }
+
+    int error = omv_csi_set_raw_window(csi, true, low, high);
+    if (error != 0) {
+        omv_csi_raise_error(error);
+    }
+
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(py_omv_csi_set_raw_window_obj, 0, 2, py_omv_csi_set_raw_window);
+
+static mp_obj_t py_omv_csi_get_raw_window() {
+    omv_csi_t *csi = omv_csi_get(-1);
+    bool enabled;
+    uint16_t low;
+    uint16_t high;
+    int error = omv_csi_get_raw_window(csi, &enabled, &low, &high);
+    if (error != 0) {
+        omv_csi_raise_error(error);
+    }
+
+    if (!enabled) {
+        return mp_const_none;
+    }
+
+    return mp_obj_new_tuple(2, (mp_obj_t []) {
+        mp_obj_new_int(low),
+        mp_obj_new_int(high),
+    });
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(py_omv_csi_get_raw_window_obj, py_omv_csi_get_raw_window);
+
 static mp_obj_t py_omv_csi_set_gainceiling(mp_obj_t gainceiling) {
     omv_csi_t *csi = omv_csi_get(-1);
     omv_csi_gainceiling_t gain;
@@ -1360,6 +1419,8 @@ static const mp_rom_map_elem_t globals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_get_framerate),               MP_ROM_PTR(&py_omv_csi_get_framerate_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_windowing),               MP_ROM_PTR(&py_omv_csi_set_windowing_obj) },
     { MP_ROM_QSTR(MP_QSTR_get_windowing),               MP_ROM_PTR(&py_omv_csi_get_windowing_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set_raw_window),              MP_ROM_PTR(&py_omv_csi_set_raw_window_obj) },
+    { MP_ROM_QSTR(MP_QSTR_get_raw_window),              MP_ROM_PTR(&py_omv_csi_get_raw_window_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_gainceiling),             MP_ROM_PTR(&py_omv_csi_set_gainceiling_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_contrast),                MP_ROM_PTR(&py_omv_csi_set_contrast_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_brightness),              MP_ROM_PTR(&py_omv_csi_set_brightness_obj) },

@@ -119,6 +119,7 @@ typedef enum {
     OMV_CSI_CONFIG_FRAMESIZE = (1 << 2),
     OMV_CSI_CONFIG_PIXFORMAT = (1 << 3),
     OMV_CSI_CONFIG_WINDOWING = (1 << 4),
+    OMV_CSI_CONFIG_RAW_WINDOW = (1 << 5),
 } omv_csi_config_t;
 
 typedef enum {
@@ -333,6 +334,9 @@ typedef struct _omv_csi {
     const uint16_t *color_palette;    // Color palette used for color lookup.
     bool disable_delays;        // Set to true to disable all sensor settling time delays.
     bool disable_full_flush;    // Turn off default frame buffer flush policy when full.
+    bool raw_window_enabled;    // Map a sub-range of raw 10-bit data to 8-bit output.
+    uint16_t raw_window_low;    // Inclusive raw window black point.
+    uint16_t raw_window_high;   // Inclusive raw window white point.
     bool recorder_active;       // Native recorder is draining the frame buffer FIFO.
     bool recorder_drop_frames;  // Drop old queued frames instead of stopping capture.
     uint32_t recorder_dropped_frames; // Frames dropped while recorder was active.
@@ -497,6 +501,12 @@ bool omv_csi_get_cropped(omv_csi_t *csi);
 
 // Set window size.
 int omv_csi_set_windowing(omv_csi_t *csi, int x, int y, int w, int h);
+
+// Map a raw 10-bit window to 8-bit output.
+int omv_csi_set_raw_window(omv_csi_t *csi, int enable, uint16_t low, uint16_t high);
+
+// Get the raw 10-bit window.
+int omv_csi_get_raw_window(omv_csi_t *csi, bool *enabled, uint16_t *low, uint16_t *high);
 
 // Set the sensor contrast level (from -3 to +3).
 int omv_csi_set_contrast(omv_csi_t *csi, int level);

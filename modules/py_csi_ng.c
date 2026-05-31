@@ -415,6 +415,63 @@ static mp_obj_t py_csi_window(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(py_csi_window_obj, 1, 2, py_csi_window);
 
+static mp_obj_t py_csi_raw_window(size_t n_args, const mp_obj_t *args) {
+    py_csi_obj_t *self = MP_OBJ_TO_PTR(args[0]);
+
+    if (n_args == 1) {
+        bool enabled;
+        uint16_t low;
+        uint16_t high;
+        int error = omv_csi_get_raw_window(self->csi, &enabled, &low, &high);
+        if (error != 0) {
+            omv_csi_raise_error(error);
+        }
+
+        if (!enabled) {
+            return mp_const_none;
+        }
+
+        return mp_obj_new_tuple(2, (mp_obj_t []) {
+            mp_obj_new_int(low),
+            mp_obj_new_int(high),
+        });
+    }
+
+    if ((n_args == 2) && (args[1] == mp_const_none)) {
+        int error = omv_csi_set_raw_window(self->csi, false, 0, 0);
+        if (error != 0) {
+            omv_csi_raise_error(error);
+        }
+        return mp_const_none;
+    }
+
+    mp_obj_t *array = (mp_obj_t *) &args[1];
+    mp_uint_t array_len = n_args - 1;
+
+    if (n_args == 2) {
+        mp_obj_get_array(args[1], &array_len, &array);
+    }
+
+    if (array_len != 2) {
+        mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("Expected (low, high) tuple/list."));
+    }
+
+    int low = mp_obj_get_int(array[0]);
+    int high = mp_obj_get_int(array[1]);
+
+    if ((low < 0) || (high < 0) || (high > 1023) || (low >= high)) {
+        omv_csi_raise_error(OMV_CSI_ERROR_INVALID_ARGUMENT);
+    }
+
+    int error = omv_csi_set_raw_window(self->csi, true, low, high);
+    if (error != 0) {
+        omv_csi_raise_error(error);
+    }
+
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(py_csi_raw_window_obj, 1, 3, py_csi_raw_window);
+
 static mp_obj_t py_csi_gainceiling(mp_obj_t self_in, mp_obj_t gainceiling) {
     py_csi_obj_t *self = MP_OBJ_TO_PTR(self_in);
     omv_csi_gainceiling_t gain;
@@ -1442,6 +1499,7 @@ static const mp_rom_map_elem_t py_csi_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_framesize),           MP_ROM_PTR(&py_csi_framesize_obj) },
     { MP_ROM_QSTR(MP_QSTR_framerate),           MP_ROM_PTR(&py_csi_framerate_obj) },
     { MP_ROM_QSTR(MP_QSTR_window),              MP_ROM_PTR(&py_csi_window_obj) },
+    { MP_ROM_QSTR(MP_QSTR_raw_window),          MP_ROM_PTR(&py_csi_raw_window_obj) },
     { MP_ROM_QSTR(MP_QSTR_gainceiling),         MP_ROM_PTR(&py_csi_gainceiling_obj) },
     { MP_ROM_QSTR(MP_QSTR_contrast),            MP_ROM_PTR(&py_csi_contrast_obj) },
     { MP_ROM_QSTR(MP_QSTR_brightness),          MP_ROM_PTR(&py_csi_brightness_obj) },
