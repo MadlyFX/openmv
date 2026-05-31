@@ -210,23 +210,12 @@ static void stm_csi_raw10_window_to_8(const uint8_t *src, uint8_t *dst,
                                       uint32_t width, uint32_t height,
                                       uint32_t line_bytes, uint16_t low, uint16_t high) {
     for (uint32_t y = 0; y < height; y++) {
-        const uint8_t *row = src + (y * line_bytes);
+        const uint16_t *row = (const uint16_t *) (src + (y * line_bytes));
         uint8_t *out = dst + (y * width);
 
-        for (uint32_t x = 0; x < width; x += 4) {
-            uint8_t b0 = row[0];
-            uint8_t b1 = row[1];
-            uint8_t b2 = row[2];
-            uint8_t b3 = row[3];
-            uint8_t b4 = row[4];
-
-            out[0] = stm_csi_raw_window_pixel((b0 << 2) | ((b4 >> 0) & 0x3), low, high);
-            out[1] = stm_csi_raw_window_pixel((b1 << 2) | ((b4 >> 2) & 0x3), low, high);
-            out[2] = stm_csi_raw_window_pixel((b2 << 2) | ((b4 >> 4) & 0x3), low, high);
-            out[3] = stm_csi_raw_window_pixel((b3 << 2) | ((b4 >> 6) & 0x3), low, high);
-
-            row += 5;
-            out += 4;
+        for (uint32_t x = 0; x < width; x++) {
+            // DCMIPP Pipe0 expands RAW10 to 16-bit MSB-aligned words.
+            out[x] = stm_csi_raw_window_pixel(row[x] >> 6, low, high);
         }
     }
 }
@@ -252,7 +241,7 @@ static int stm_csi_raw_window_snapshot(omv_csi_t *csi, image_t *image, uint32_t 
         return OMV_CSI_ERROR_FRAMEBUFFER_OVERFLOW;
     }
 
-    uint32_t line_bytes = (fb->u / 4) * 5;
+    uint32_t line_bytes = fb->u * sizeof(uint16_t);
     uint32_t raw_size = line_bytes * fb->v;
     int ret = stm_csi_raw_window_alloc(csi, raw_size);
     if (ret != 0) {
