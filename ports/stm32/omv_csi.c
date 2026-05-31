@@ -214,8 +214,8 @@ static void stm_csi_raw10_window_to_8(const uint8_t *src, uint8_t *dst,
         uint8_t *out = dst + (y * width);
 
         for (uint32_t x = 0; x < width; x++) {
-            // DCMIPP Pipe0 expands RAW10 to 16-bit MSB-aligned words.
-            out[x] = stm_csi_raw_window_pixel(row[x] >> 6, low, high);
+            // DCMIPP Pipe0 expands RAW10 to 16-bit LSB-aligned words.
+            out[x] = stm_csi_raw_window_pixel(row[x] & 0x03FF, low, high);
         }
     }
 }
