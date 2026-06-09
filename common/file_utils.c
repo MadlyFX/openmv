@@ -162,6 +162,24 @@ void file_seek(file_t *fp, size_t offset) {
     }
 }
 
+void file_preallocate(file_t *fp, size_t size) {
+    if (!fp || fp->fp == MP_OBJ_NULL || !size) {
+        return;
+    }
+
+    mp_obj_t method[3];
+    mp_load_method_maybe(fp->fp, MP_QSTR_preallocate, method);
+    if (method[0] != MP_OBJ_NULL) {
+        method[2] = mp_obj_new_int_from_uint(size);
+        mp_call_method_n_kw(1, 0, method);
+        return;
+    }
+
+    file_seek(fp, size - 1);
+    file_write_byte(fp, 0);
+    file_seek(fp, 0);
+}
+
 void file_truncate(file_t *fp) {
     if (!fp || fp->fp == MP_OBJ_NULL) {
         return;

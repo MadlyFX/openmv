@@ -227,7 +227,9 @@
 
 /* ################## SDMMC peripheral configuration ######################### */
 
+#ifndef USE_SD_TRANSCEIVER
 #define USE_SD_TRANSCEIVER            0U
+#endif
 
 /* Includes ------------------------------------------------------------------*/
 /**
