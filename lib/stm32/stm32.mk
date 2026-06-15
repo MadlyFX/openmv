@@ -235,7 +235,6 @@ HAL_SRC_C += $(addprefix stm32/n6/src/,\
     stm32n6xx_ll_crc.c \
     stm32n6xx_ll_dma2d.c \
     stm32n6xx_ll_dma.c \
-    stm32n6xx_ll_dlyb.c \
     stm32n6xx_ll_exti.c \
     stm32n6xx_ll_fmc.c \
     stm32n6xx_ll_gpio.c \

@@ -64,7 +64,6 @@ typedef struct py_video_recorder {
     bool recording;
     bool stream_was_enabled;
     bool mjpeg_opened;
-    size_t preallocated;
 } py_video_recorder_t;
 
 static void py_video_raise_csi_error(int error) {
@@ -490,10 +489,6 @@ static mp_obj_t py_video_recorder_close(mp_obj_t self_in) {
             mjpeg_sync(&self->fp, self->frames, self->mjpeg_bytes, us_avg);
         }
 
-        if (self->preallocated && self->bytes < self->preallocated) {
-            file_seek(&self->fp, (size_t) self->bytes);
-            file_truncate(&self->fp);
-        }
         file_sync(&self->fp);
         file_close(&self->fp);
         if (self->codec == PY_VIDEO_CODEC_H264) {
@@ -521,7 +516,6 @@ static mp_obj_t py_video_recorder_make_new(const mp_obj_type_t *type,
         ARG_gop,
         ARG_buffer_size,
         ARG_write_buffer,
-        ARG_preallocate,
     };
     static const mp_arg_t allowed_args[] = {
         { MP_QSTR_cam,          MP_ARG_OBJ | MP_ARG_REQUIRED, {.u_rom_obj = MP_ROM_NONE} },
@@ -534,7 +528,6 @@ static mp_obj_t py_video_recorder_make_new(const mp_obj_type_t *type,
         { MP_QSTR_gop,          MP_ARG_INT | MP_ARG_KW_ONLY,  {.u_int = -1} },
         { MP_QSTR_buffer_size,  MP_ARG_INT | MP_ARG_KW_ONLY,  {.u_int = PY_VIDEO_DEFAULT_OUT_BUFFER} },
         { MP_QSTR_write_buffer, MP_ARG_INT | MP_ARG_KW_ONLY,  {.u_int = PY_VIDEO_DEFAULT_WRITE_BUFFER} },
-        { MP_QSTR_preallocate,  MP_ARG_INT | MP_ARG_KW_ONLY,  {.u_int = 0} },
     };
 
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
@@ -553,10 +546,6 @@ static mp_obj_t py_video_recorder_make_new(const mp_obj_type_t *type,
     if (args[ARG_buffer_size].u_int <= 0 ||
         args[ARG_write_buffer].u_int < PY_VIDEO_MIN_WRITE_BUFFER) {
         mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("invalid video buffer size"));
-    }
-
-    if (args[ARG_preallocate].u_int < 0) {
-        mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("preallocate must not be negative"));
     }
 
     if ((args[ARG_quality].u_int < 0) || (args[ARG_quality].u_int > 100)) {
@@ -585,7 +574,6 @@ static mp_obj_t py_video_recorder_make_new(const mp_obj_type_t *type,
     self->quality = args[ARG_quality].u_int;
     self->out_size = args[ARG_buffer_size].u_int;
     self->write_size = args[ARG_write_buffer].u_int;
-    self->preallocated = args[ARG_preallocate].u_int;
 
     self->out_buf = uma_malign(self->out_size, OMV_CACHE_LINE_SIZE, UMA_PERSIST | UMA_CACHE | UMA_MAYBE);
     self->write_buf = uma_malign(self->write_size, OMV_CACHE_LINE_SIZE, UMA_PERSIST | UMA_CACHE | UMA_MAYBE);
@@ -597,10 +585,8 @@ static mp_obj_t py_video_recorder_make_new(const mp_obj_type_t *type,
     nlr_buf_t nlr;
     if (nlr_push(&nlr) == 0) {
         file_open(&self->fp, path, FA_WRITE | FA_CREATE_ALWAYS);
-        file_preallocate(&self->fp, self->preallocated);
         nlr_pop();
     } else {
-        file_close(&self->fp);
         py_video_free_buffers(self);
         nlr_jump(nlr.ret_val);
     }
@@ -623,10 +609,6 @@ static mp_obj_t py_video_recorder_make_new(const mp_obj_type_t *type,
 
         int error = stm_h264_init(&self->h264, &config);
         if (error < 0) {
-            if (self->preallocated) {
-                file_seek(&self->fp, 0);
-                file_truncate(&self->fp);
-            }
             file_close(&self->fp);
             self->closed = true;
             py_video_free_buffers(self);
@@ -634,10 +616,6 @@ static mp_obj_t py_video_recorder_make_new(const mp_obj_type_t *type,
         }
     } else if (self->codec == PY_VIDEO_CODEC_MJPEG) {
         if (!py_video_mjpeg_pixformat_supported(csi->pixformat)) {
-            if (self->preallocated) {
-                file_seek(&self->fp, 0);
-                file_truncate(&self->fp);
-            }
             file_close(&self->fp);
             self->closed = true;
             py_video_free_buffers(self);
@@ -650,10 +628,6 @@ static mp_obj_t py_video_recorder_make_new(const mp_obj_type_t *type,
         self->bytes = file_tell(&self->fp);
     } else {
         if (!py_video_raw_pixformat_supported(csi->pixformat)) {
-            if (self->preallocated) {
-                file_seek(&self->fp, 0);
-                file_truncate(&self->fp);
-            }
             file_close(&self->fp);
             self->closed = true;
             py_video_free_buffers(self);

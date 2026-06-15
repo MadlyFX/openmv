@@ -55,7 +55,6 @@ void file_raise_error(file_t *fp, mp_rom_error_text_t msg);
 void file_open(file_t *fp, const char *path, uint32_t flags);
 void file_close(file_t *fp);
 void file_seek(file_t *fp, size_t offset);
-void file_preallocate(file_t *fp, size_t size);
 void file_truncate(file_t *fp);
 void file_sync(file_t *fp);
 size_t file_tell(file_t *fp);
