@@ -176,9 +176,6 @@ __weak int omv_csi_init() {
     #if defined(OMV_CSI_RESET_PIN)
     omv_gpio_config(OMV_CSI_RESET_PIN, OMV_GPIO_MODE_OUTPUT, OMV_GPIO_PULL_NONE, OMV_GPIO_SPEED_LOW, -1);
     #endif
-    #if defined(OMV_CSI_FSYNC_PIN)
-    omv_gpio_config(OMV_CSI_FSYNC_PIN, OMV_GPIO_MODE_OUTPUT, OMV_GPIO_PULL_NONE, OMV_GPIO_SPEED_LOW, -1);
-    #endif
     #if defined(OMV_CSI_POWER_PIN)
     omv_gpio_config(OMV_CSI_POWER_PIN, OMV_GPIO_MODE_OUTPUT, OMV_GPIO_PULL_NONE, OMV_GPIO_SPEED_LOW, -1);
     #endif
@@ -193,6 +190,9 @@ __weak int omv_csi_init() {
         csi->clk = &csi_clk;
         csi->fb = framebuffer_get(FB_MAINFB_ID);
         csi->color_palette = rainbow_table;
+        #if defined(OMV_CSI_FSYNC_PIN)
+        csi->fsync_pin = OMV_CSI_FSYNC_PIN;
+        #endif
         memcpy(csi->resolution, csi_resolution, sizeof(csi_resolution));
         omv_csi_ops_init(csi);
 
@@ -272,11 +272,9 @@ __weak int omv_csi_abort(omv_csi_t *csi, bool fifo_flush, bool in_irq) {
         framebuffer_flush(csi->fb);
     }
 
-    #if defined(OMV_CSI_FSYNC_PIN)
-    if (csi->frame_sync) {
-        omv_gpio_write(OMV_CSI_FSYNC_PIN, 0);
+    if (csi->fsync_pin) {
+        omv_gpio_write(csi->fsync_pin, 0);
     }
-    #endif
 
     return 0;
 }
@@ -351,6 +349,12 @@ __weak int omv_csi_reset(omv_csi_t *csi, bool hard) {
     }
 
     if (hard) {
+        // Stop the sensor's activity cleanly.
+        if (csi->power_on && csi->halt_req) {
+            omv_csi_sleep(csi, true);
+            mp_hal_delay_ms(10);
+        }
+
         // Disable the bus before reset.
         omv_i2c_enable(csi->i2c, false);
 
@@ -606,6 +610,10 @@ int omv_csi_probe(omv_i2c_t *i2c) {
             return OMV_CSI_ERROR_ISC_INIT_FAILED;
         }
 
+        if (csi->fsync_pin) {
+            omv_gpio_config(csi->fsync_pin, OMV_GPIO_MODE_OUTPUT, OMV_GPIO_PULL_NONE, OMV_GPIO_SPEED_LOW, -1);
+        }
+
         // Sensors can change the clock's frequency or disable it
         // (with clk_hz=0). This is allowed only if the clock is
         // not shared (dev_count == 1) or if this is a main sensor.
@@ -719,6 +727,12 @@ __weak int omv_csi_shutdown(omv_csi_t *csi, int enable) {
 
     // Disable any ongoing frame capture.
     omv_csi_abort(csi, true, false);
+
+    // Stop the sensor's activity cleanly.
+    if (enable && csi->power_on && csi->halt_req) {
+        omv_csi_sleep(csi, true);
+        mp_hal_delay_ms(10);
+    }
 
     #if defined(OMV_CSI_POWER_PIN)
     if (enable) {
@@ -1735,21 +1749,17 @@ __weak int omv_csi_snapshot(omv_csi_t *csi, image_t *image, uint32_t flags) {
     }
 
     // Toggle FSYNC.
-    #if defined(OMV_CSI_FSYNC_PIN)
-    if (csi->frame_sync) {
-        omv_gpio_write(OMV_CSI_FSYNC_PIN, 1);
+    if (csi->fsync_pin) {
+        omv_gpio_write(csi->fsync_pin, 1);
     }
-    #endif
 
     // Call the sensor specific function.
     int ret = csi->snapshot(csi, image, flags);
 
     // Toggle FSYNC.
-    #if defined(OMV_CSI_FSYNC_PIN)
-    if (csi->frame_sync) {
-        omv_gpio_write(OMV_CSI_FSYNC_PIN, 0);
+    if (csi->fsync_pin) {
+        omv_gpio_write(csi->fsync_pin, 0);
     }
-    #endif
 
     // Call the sensor specific post-process.
     if (ret >= 0 && csi->post_process && !(flags & OMV_CSI_FLAG_NO_POST)) {
@@ -1853,6 +1863,8 @@ const char *omv_csi_name(omv_csi_t *csi) {
         case LEPTON_2_0:         return "Lepton 2.0";
         case LEPTON_2_5:         return "Lepton 2.5";
         case LEPTON_3_0:         return "Lepton 3.0";
+        case LEPTON_3_1R:        return "Lepton 3.1R";
+        case LEPTON_UW:          return "Lepton UW";
         case LEPTON_3_5:         return "Lepton 3.5";
         case HM01B0_ID:          return "HM01B0";
         case HM0360_ID:          return "HM0360";

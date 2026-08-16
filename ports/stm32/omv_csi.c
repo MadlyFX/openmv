@@ -44,7 +44,6 @@
 #include "stm_dma.h"
 #include "stm_isp.h"
 #include "stm_pwm.h"
-#include "umalloc.h"
 
 #if defined(DCMIPP)
 #define USE_DCMIPP          (1)
@@ -121,12 +120,36 @@ void omv_csi_mdma_irq_handler(void) {
 static bool stm_csi_is_active(omv_csi_t *csi) {
     #if USE_DCMIPP
     if (csi->mipi_if) {
-        return (DCMIPP->P1FCTCR & DCMIPP_P1FCTCR_CPTREQ) ||
-               (DCMIPP->P0FCTCR & DCMIPP_P0FCTCR_CPTREQ);
+        return (DCMIPP->P1FCTCR & DCMIPP_P1FCTCR_CPTREQ);
     }
     #endif
     return (DCMI->CR & DCMI_CR_ENABLE);
 }
+
+#if USE_DCMIPP
+// Map a numeric MIPI bitrate (Mb/s) to the closest DCMIPP_CSI_PHY_BT_* enum.
+static uint32_t stm_csi_mipi_bitrate(uint32_t mbps) {
+    static const uint16_t bitrates[] = {
+        80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, // +10
+        205, 220, 235, 250, // +15
+        275, 300, 325, 350, // +25
+        400, 450, 500, 550, 600, 650, 700, 750, 800, 850, 900, 950, // +50
+        1000, 1050, 1100, 1150, 1200, 1250, 1300, 1350, 1400, 1450, 1500, 1550, // +50
+        1600, 1650, 1700, 1750, 1800, 1850, 1900, 1950, 2000, 2050, 2100, 2150, // +50
+        2200, 2250, 2300, 2350, 2400, 2450, 2500 // +50
+    };
+    size_t best = 0;
+    uint32_t best_diff = abs((int) mbps - (int) bitrates[0]);
+    for (size_t i = 1; i < OMV_ARRAY_SIZE(bitrates); i++) {
+        uint32_t diff = abs((int) mbps - (int) bitrates[i]);
+        if (diff < best_diff) {
+            best = i;
+            best_diff = diff;
+        }
+    }
+    return best;
+}
+#endif // USE_DCMIPP
 
 int stm_csi_isp_reset(omv_csi_t *csi) {
     #if USE_DCMIPP
@@ -136,235 +159,6 @@ int stm_csi_isp_reset(omv_csi_t *csi) {
     #endif // USE_DCMIPP
     return 0;
 }
-
-#if USE_DCMIPP && defined(STM32N6)
-static void stm_csi_raw_window_free(omv_csi_t *csi) {
-    if (csi->raw_window_buffer != NULL) {
-        uma_free(csi->raw_window_buffer);
-        csi->raw_window_buffer = NULL;
-        csi->raw_window_buffer_size = 0;
-    }
-}
-
-static int stm_csi_raw_window_alloc(omv_csi_t *csi, uint32_t size) {
-    size = OMV_ALIGN_TO(size, OMV_CACHE_LINE_SIZE);
-
-    if (csi->raw_window_buffer_size >= size) {
-        return 0;
-    }
-
-    stm_csi_raw_window_free(csi);
-    csi->raw_window_buffer = uma_malign(size, OMV_CACHE_LINE_SIZE, UMA_PERSIST | UMA_CACHE | UMA_MAYBE);
-
-    if (csi->raw_window_buffer == NULL) {
-        return OMV_CSI_ERROR_FRAMEBUFFER_ERROR;
-    }
-
-    csi->raw_window_buffer_size = size;
-    return 0;
-}
-
-static int stm_csi_raw_window_config_pipe(omv_csi_t *csi) {
-    if (csi->dcmipp.PipeState[DCMIPP_PIPE0] == HAL_DCMIPP_PIPE_STATE_BUSY) {
-        return OMV_CSI_ERROR_CAPTURE_FAILED;
-    }
-
-    if ((csi->dcmipp.PipeState[DCMIPP_PIPE0] == HAL_DCMIPP_PIPE_STATE_RESET) ||
-        (csi->dcmipp.PipeState[DCMIPP_PIPE0] == HAL_DCMIPP_PIPE_STATE_ERROR)) {
-        DCMIPP_PipeConfTypeDef pcfg = {
-            .FrameRate = DCMIPP_FRAME_RATE_ALL
-        };
-
-        if (HAL_DCMIPP_PIPE_SetConfig(&csi->dcmipp, DCMIPP_PIPE0, &pcfg) != HAL_OK) {
-            return OMV_CSI_ERROR_CSI_INIT_FAILED;
-        }
-    }
-
-    DCMIPP_CSI_PIPE_ConfTypeDef csi_pcfg = {
-        .DataTypeMode = DCMIPP_DTMODE_DTIDA,
-        .DataTypeIDA = DCMIPP_DT_RAW10,
-        .DataTypeIDB = DCMIPP_DT_RAW10,
-    };
-
-    if (HAL_DCMIPP_CSI_PIPE_SetConfig(&csi->dcmipp, DCMIPP_PIPE0, &csi_pcfg) != HAL_OK) {
-        return OMV_CSI_ERROR_CSI_INIT_FAILED;
-    }
-
-    return 0;
-}
-
-static uint8_t stm_csi_raw_window_pixel(uint16_t pixel, uint16_t low, uint16_t high) {
-    if (pixel <= low) {
-        return 0;
-    }
-
-    if (pixel >= high) {
-        return UINT8_MAX;
-    }
-
-    uint32_t range = high - low;
-    return ((pixel - low) * UINT8_MAX) / range;
-}
-
-static uint16_t stm_csi_raw10_window_sample(const uint16_t *row, uint32_t x) {
-    // DCMIPP Pipe0 expands RAW10 to 16-bit words with the sample in bits 9:0.
-    return row[x] & 0x03FF;
-}
-
-static pixformat_t stm_csi_raw_window_bayer_pixfmt(omv_csi_t *csi, framebuffer_t *fb) {
-    pixformat_t pixfmt = PIXFORMAT_BAYER_BGGR;
-
-    if (csi->cfa_format == SUBFORMAT_ID_GBRG) {
-        pixfmt = PIXFORMAT_BAYER_GBRG;
-    } else if (csi->cfa_format == SUBFORMAT_ID_GRBG) {
-        pixfmt = PIXFORMAT_BAYER_GRBG;
-    } else if (csi->cfa_format == SUBFORMAT_ID_RGGB) {
-        pixfmt = PIXFORMAT_BAYER_RGGB;
-    }
-
-    return imlib_bayer_shift(pixfmt, fb->x, fb->y, false);
-}
-
-static void stm_csi_raw10_window_to_8(const uint8_t *src, uint8_t *dst,
-                                      uint32_t width, uint32_t height,
-                                      uint32_t line_bytes, uint16_t low, uint16_t high) {
-    for (uint32_t y = 0; y < height; y++) {
-        const uint16_t *row = (const uint16_t *) (src + (y * line_bytes));
-        uint8_t *out = dst + (y * width);
-
-        for (uint32_t x = 0; x < width; x++) {
-            out[x] = stm_csi_raw_window_pixel(stm_csi_raw10_window_sample(row, x), low, high);
-        }
-    }
-}
-
-static int stm_csi_raw_window_snapshot(omv_csi_t *csi, image_t *image, uint32_t flags) {
-    framebuffer_t *fb = csi->fb;
-    (void) flags;
-
-    if ((csi->pixformat != PIXFORMAT_GRAYSCALE) &&
-        (csi->pixformat != PIXFORMAT_BAYER)) {
-        return OMV_CSI_ERROR_PIXFORMAT_UNSUPPORTED;
-    }
-
-    if (csi->transpose || csi->auto_rotation) {
-        return OMV_CSI_ERROR_PIXFORMAT_UNSUPPORTED;
-    }
-
-    if ((!fb->u) || (!fb->v) || ((fb->x | fb->u) & 0x3)) {
-        return OMV_CSI_ERROR_INVALID_FRAMESIZE;
-    }
-
-    if ((fb->u * fb->v) > framebuffer_get_buffer_size(fb)) {
-        return OMV_CSI_ERROR_FRAMEBUFFER_OVERFLOW;
-    }
-
-    uint32_t line_bytes = fb->u * sizeof(uint16_t);
-    uint32_t raw_size = line_bytes * fb->v;
-    int ret = stm_csi_raw_window_alloc(csi, raw_size);
-    if (ret != 0) {
-        return ret;
-    }
-
-    vbuffer_t *buffer = framebuffer_acquire(fb, FB_FLAG_FREE | FB_FLAG_PEEK);
-    if (buffer == NULL) {
-        return OMV_CSI_ERROR_FRAMEBUFFER_ERROR;
-    }
-
-    if ((ret = stm_csi_raw_window_config_pipe(csi)) != 0) {
-        return ret;
-    }
-
-    DCMIPP_CropConfTypeDef ccfg = {
-        .HStart = fb->x,
-        .VStart = fb->y,
-        .HSize = fb->u,
-        .VSize = fb->v,
-        .PipeArea = DCMIPP_POSITIVE_AREA,
-    };
-
-    if ((HAL_DCMIPP_PIPE_SetCropConfig(&csi->dcmipp, DCMIPP_PIPE0, &ccfg) != HAL_OK) ||
-        (HAL_DCMIPP_PIPE_EnableCrop(&csi->dcmipp, DCMIPP_PIPE0) != HAL_OK)) {
-        return OMV_CSI_ERROR_CSI_INIT_FAILED;
-    }
-
-    csi->dcmipp.ErrorCode = HAL_DCMIPP_ERROR_NONE;
-    csi->raw_window_done = false;
-    csi->raw_window_error = false;
-    csi->raw_window_active = true;
-
-    #ifdef __DCACHE_PRESENT
-    SCB_CleanInvalidateDCache_by_Addr(csi->raw_window_buffer, csi->raw_window_buffer_size);
-    #endif
-
-    if (HAL_DCMIPP_CSI_PIPE_Start(&csi->dcmipp, DCMIPP_PIPE0, DCMIPP_VIRTUAL_CHANNEL0,
-                                  (uint32_t) csi->raw_window_buffer, DCMIPP_MODE_SNAPSHOT) != HAL_OK) {
-        csi->raw_window_active = false;
-        HAL_DCMIPP_PIPE_DisableCrop(&csi->dcmipp, DCMIPP_PIPE0);
-        return OMV_CSI_ERROR_CAPTURE_FAILED;
-    }
-
-    for (mp_uint_t start = mp_hal_ticks_ms(); !csi->raw_window_done; mp_event_handle_nowait()) {
-        if ((mp_hal_ticks_ms() - start) > OMV_CSI_TIMEOUT_MS) {
-            ret = OMV_CSI_ERROR_CAPTURE_TIMEOUT;
-            break;
-        }
-    }
-
-    if (HAL_DCMIPP_CSI_PIPE_Stop(&csi->dcmipp, DCMIPP_PIPE0, DCMIPP_VIRTUAL_CHANNEL0) != HAL_OK) {
-        ret = OMV_CSI_ERROR_CAPTURE_FAILED;
-    }
-
-    HAL_DCMIPP_PIPE_DisableCrop(&csi->dcmipp, DCMIPP_PIPE0);
-    csi->raw_window_active = false;
-
-    if (ret != 0) {
-        return ret;
-    }
-
-    if (csi->raw_window_error) {
-        return OMV_CSI_ERROR_CAPTURE_FAILED;
-    }
-
-    #ifdef __DCACHE_PRESENT
-    SCB_InvalidateDCache_by_Addr(csi->raw_window_buffer, csi->raw_window_buffer_size);
-    #endif
-
-    stm_csi_raw10_window_to_8(csi->raw_window_buffer, buffer->data,
-                              fb->u, fb->v, line_bytes,
-                              csi->raw_window_low, csi->raw_window_high);
-
-    fb->w = fb->u;
-    fb->h = fb->v;
-    fb->size = fb->w * fb->h;
-
-    if (csi->pixformat == PIXFORMAT_BAYER) {
-        fb->pixfmt = stm_csi_raw_window_bayer_pixfmt(csi, fb);
-    } else {
-        image_t src = {
-            .w = fb->w,
-            .h = fb->h,
-            .pixfmt = stm_csi_raw_window_bayer_pixfmt(csi, fb),
-            .data = buffer->data,
-        };
-        image_t dst = {
-            .w = fb->w,
-            .h = fb->h,
-            .pixfmt = PIXFORMAT_GRAYSCALE,
-            .data = csi->raw_window_buffer,
-        };
-        imlib_debayer_image(&dst, &src);
-        memcpy(buffer->data, csi->raw_window_buffer, fb->size);
-        fb->pixfmt = PIXFORMAT_GRAYSCALE;
-    }
-
-    // Release the buffer from free queue -> used queue.
-    framebuffer_release(fb, FB_FLAG_FREE | FB_FLAG_CHECK_LAST);
-
-    framebuffer_to_image(fb, image);
-    return 0;
-}
-#endif  // USE_DCMIPP && defined(STM32N6)
 
 static int stm_csi_config(omv_csi_t *csi, omv_csi_config_t config) {
     if (config == OMV_CSI_CONFIG_INIT) {
@@ -434,7 +228,7 @@ static int stm_csi_config(omv_csi_t *csi, omv_csi_config_t config) {
             DCMIPP_CSI_ConfTypeDef scfg = {
                 .NumberOfLanes = DCMIPP_CSI_TWO_DATA_LANES,
                 .DataLaneMapping = DCMIPP_CSI_PHYSICAL_DATA_LANES,
-                .PHYBitrate = (csi->mipi_brate == 850) ? DCMIPP_CSI_PHY_BT_850 : DCMIPP_CSI_PHY_BT_1200,
+                .PHYBitrate = stm_csi_mipi_bitrate(csi->mipi_brate),
             };
 
             if (HAL_DCMIPP_CSI_SetConfig(&csi->dcmipp, &scfg) != HAL_OK) {
@@ -457,12 +251,10 @@ static int stm_csi_config(omv_csi_t *csi, omv_csi_config_t config) {
                 return OMV_CSI_ERROR_CSI_INIT_FAILED;
             }
 
-            DCMIPP_PipeConfTypeDef dump_pcfg = {
-                .FrameRate = DCMIPP_FRAME_RATE_ALL
-            };
-
-            if (HAL_DCMIPP_PIPE_SetConfig(&csi->dcmipp, DCMIPP_PIPE0, &dump_pcfg) != HAL_OK ||
-                HAL_DCMIPP_CSI_PIPE_SetConfig(&csi->dcmipp, DCMIPP_PIPE0, &csi_pcfg) != HAL_OK) {
+            // ST software workaround for spurious DCMIPP multiline interrupts triggering the VENC hardware
+            // handshake input in frame mode which crashes the VENC.
+            if (HAL_DCMIPP_PIPE_EnableLineEvent(&csi->dcmipp, DCMIPP_PIPE, DCMIPP_MULTILINE_128_LINES) != HAL_OK ||
+                HAL_DCMIPP_PIPE_DisableLineEvent(&csi->dcmipp, DCMIPP_PIPE) != HAL_OK) {
                 return OMV_CSI_ERROR_CSI_INIT_FAILED;
             }
 
@@ -486,9 +278,6 @@ static int stm_csi_config(omv_csi_t *csi, omv_csi_config_t config) {
             #if USE_DCMIPP
             HAL_NVIC_DisableIRQ(DCMIPP_IRQn);
             HAL_DCMIPP_DeInit(&csi->dcmipp);
-            #if defined(STM32N6)
-            stm_csi_raw_window_free(csi);
-            #endif
             #endif
         }
     } else if (config == OMV_CSI_CONFIG_PIXFORMAT) {
@@ -526,12 +315,6 @@ static int stm_csi_config(omv_csi_t *csi, omv_csi_config_t config) {
             }
             #endif
         }
-    } else if (config == OMV_CSI_CONFIG_RAW_WINDOW) {
-        #if USE_DCMIPP && defined(STM32N6)
-        if (!csi->raw_window_enabled) {
-            stm_csi_raw_window_free(csi);
-        }
-        #endif
     }
 
     return 0;
@@ -539,16 +322,6 @@ static int stm_csi_config(omv_csi_t *csi, omv_csi_config_t config) {
 
 // Stop the DCMI from generating more DMA requests, and disable the DMA.
 static int stm_csi_abort(omv_csi_t *csi, bool fifo_flush, bool in_irq) {
-    #if USE_DCMIPP && defined(STM32N6)
-    if (csi->mipi_if && csi->raw_window_active) {
-        HAL_DCMIPP_CSI_PIPE_Stop(&csi->dcmipp, DCMIPP_PIPE0, DCMIPP_VIRTUAL_CHANNEL0);
-        HAL_DCMIPP_PIPE_DisableCrop(&csi->dcmipp, DCMIPP_PIPE0);
-        csi->raw_window_active = false;
-        csi->raw_window_done = false;
-        csi->raw_window_error = false;
-    }
-    #endif
-
     if (!stm_csi_is_active(csi)) {
         return 0;
     }
@@ -666,7 +439,7 @@ static void stm_csi_frame_event(omv_csi_t *csi, uint32_t pipe) {
     // The ISP AWB stats lag by one frame. So, drop the first frame when not initialized.
     #if defined(OMV_CSI_STATS_ENABLE)
     if (csi->raw_output && csi->stats_enabled && !csi->stats.initialized) {
-        stm_isp_update_awb(csi, DCMIPP_PIPE, fb->u * fb->v);
+        stm_isp_update_awb(csi, DCMIPP_PIPE);
         csi->drop_frame = true;
     }
     #endif // OMV_CSI_STATS_ENABLE
@@ -691,13 +464,6 @@ static void stm_csi_frame_event(omv_csi_t *csi, uint32_t pipe) {
     // Acquire a buffer from the free queue.
     vbuffer_t *buffer = framebuffer_acquire(fb, FB_FLAG_FREE | FB_FLAG_PEEK);
 
-    if (buffer == NULL && csi->recorder_active && csi->recorder_drop_frames) {
-        if (framebuffer_release(fb, FB_FLAG_USED | FB_FLAG_INVALIDATE)) {
-            csi->recorder_dropped_frames++;
-            buffer = framebuffer_acquire(fb, FB_FLAG_FREE | FB_FLAG_PEEK);
-        }
-    }
-
     if (buffer == NULL) {
         omv_csi_abort(csi, false, false);
     } else if (csi->mipi_if) {
@@ -716,30 +482,7 @@ void HAL_DCMI_FrameEventCallback(DCMI_HandleTypeDef *hdcmi) {
 
 #if USE_DCMIPP
 void HAL_DCMIPP_PIPE_FrameEventCallback(DCMIPP_HandleTypeDef *hdcmi, uint32_t pipe) {
-    omv_csi_t *csi = OMV_CONTAINER_OF(hdcmi, omv_csi_t, dcmipp);
-
-    #if defined(STM32N6)
-    if ((pipe == DCMIPP_PIPE0) && csi->raw_window_active) {
-        csi->raw_window_done = true;
-        return;
-    }
-    #endif
-
-    stm_csi_frame_event(csi, pipe);
-}
-
-void HAL_DCMIPP_PIPE_ErrorCallback(DCMIPP_HandleTypeDef *hdcmi, uint32_t pipe) {
-    #if defined(STM32N6)
-    omv_csi_t *csi = OMV_CONTAINER_OF(hdcmi, omv_csi_t, dcmipp);
-
-    if ((pipe == DCMIPP_PIPE0) && csi->raw_window_active) {
-        csi->raw_window_error = true;
-        csi->raw_window_done = true;
-    }
-    #else
-    (void) hdcmi;
-    (void) pipe;
-    #endif
+    stm_csi_frame_event(OMV_CONTAINER_OF(hdcmi, omv_csi_t, dcmipp), pipe);
 }
 #endif
 
@@ -836,15 +579,6 @@ static int stm_csi_snapshot(omv_csi_t *csi, image_t *image, uint32_t flags) {
     vbuffer_t *buffer = NULL;
     framebuffer_t *fb = csi->fb;
 
-    if (csi->raw_window_enabled) {
-        #if USE_DCMIPP && defined(STM32N6)
-        if (csi->mipi_if) {
-            return stm_csi_raw_window_snapshot(csi, image, flags);
-        }
-        #endif
-        return OMV_CSI_ERROR_CTL_UNSUPPORTED;
-    }
-
     // Configure and re/start the capture if it's not alrady active
     // and there are no pending buffers (from non-blocking capture).
     if (!stm_csi_is_active(csi) && !framebuffer_readable(fb)) {
@@ -863,15 +597,7 @@ static int stm_csi_snapshot(omv_csi_t *csi, image_t *image, uint32_t flags) {
                 return OMV_CSI_ERROR_INVALID_FRAMESIZE;
             }
 
-            // Configure crop
-            DCMIPP_CropConfTypeDef ccfg = {
-                .HStart = fb->x,
-                .VStart = fb->y,
-                .HSize = fb->u,
-                .VSize = fb->v,
-            };
-            if (HAL_DCMIPP_PIPE_SetCropConfig(&csi->dcmipp, DCMIPP_PIPE, &ccfg) != HAL_OK ||
-                HAL_DCMIPP_PIPE_EnableCrop(&csi->dcmipp, DCMIPP_PIPE) != HAL_OK) {
+            if (stm_isp_set_scaler(csi, DCMIPP_PIPE)) {
                 return OMV_CSI_ERROR_CSI_INIT_FAILED;
             }
 
@@ -1071,7 +797,7 @@ static int stm_csi_snapshot(omv_csi_t *csi, image_t *image, uint32_t flags) {
 
     #if USE_DCMIPP
     if (csi->raw_output) {
-        float luminance = stm_isp_update_awb(csi, DCMIPP_PIPE, fb->u * fb->v);
+        float luminance = stm_isp_update_awb(csi, DCMIPP_PIPE);
         if (csi->ioctl) {
             omv_csi_ioctl(csi, OMV_CSI_IOCTL_UPDATE_AGC_AEC, fast_floorf(luminance));
         }

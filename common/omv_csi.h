@@ -85,6 +85,8 @@
 #define LEPTON_2_0              (0x5420)
 #define LEPTON_2_5              (0x5425)
 #define LEPTON_3_0              (0x5430)
+#define LEPTON_3_1R             (0x5431)
+#define LEPTON_UW               (0x5432)
 #define LEPTON_3_5              (0x5435)
 #define HM01B0_ID               (0xB0)
 #define HM0360_ID               (0x60)
@@ -317,7 +319,6 @@ typedef struct _omv_csi {
         uint32_t vsync_pol  : 1;  // Vertical sync polarity.
         uint32_t hsync_pol  : 1;  // Horizontal sync polarity.
         uint32_t pixck_pol  : 1;  // Pixel clock edge.
-        uint32_t frame_sync : 1;  // Hardware frame sync.
         uint32_t mono_bpp   : 2;  // Grayscale bytes per pixel output.
         uint32_t rgb_swap   : 1;  // Byte-swap 2BPP RGB formats after capture.
         uint32_t yuv_swap   : 1;  // Byte-swap 2BPP YUV formats after capture.
@@ -329,6 +330,7 @@ typedef struct _omv_csi {
         uint32_t mipi_if    : 1;  // CSI-2 interface.
         uint32_t mipi_brate : 12; // CSI-2 interface bitrate.
         uint32_t auxiliary  : 1;  // Indicates that the sensor can be used in dual-CSI config.
+        uint32_t halt_req   : 1;  // Indicates that the sensor requires sleeping before reset/shutdown.
     };
 
     const uint16_t *color_palette;    // Color palette used for color lookup.
@@ -365,6 +367,7 @@ typedef struct _omv_csi {
     omv_i2c_t *i2c;             // SCCB/I2C bus.
     framebuffer_t *fb;          // Frame buffer pointer
     omv_clk_t *clk;             // Clock controller.
+    omv_gpio_t fsync_pin;       // Frame sync pin.
     uint32_t clk_hz;            // Clock freqeuency request by this CSI.
     uint32_t reset_time_ms;     // To track elapsed time since hard-reset.
     uint32_t power_time_ms;     // To track elapsed time since power on.
@@ -386,6 +389,12 @@ typedef struct _omv_csi {
 
     // Resolution table
     uint16_t resolution[OMV_CSI_FRAMESIZE_MAX][2];
+
+    #ifdef OMV_CSI_HW_SCALE_ENABLE
+    // Sensor raw resolution output (i.e. before cropping and scaling).
+    uint16_t src_w;
+    uint16_t src_h;
+    #endif // OMV_CSI_HW_SCALE_ENABLE
 
     // Sensor function pointers
     int (*reset) (omv_csi_t *csi);

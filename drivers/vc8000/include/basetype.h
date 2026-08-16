@@ -71,10 +71,12 @@ typedef size_t ptr_t;
 #endif
 
 #ifndef __cplusplus
+#ifndef bool
 typedef enum {
         false   = 0,
         true    = 1
 } bool;
+#endif
 #endif
 
 #else /* __symbian__ or __win__ or whatever, customize it to suit well */

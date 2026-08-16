@@ -3,11 +3,13 @@ add_library("openmv-lib", "$(OMV_LIB_DIR)")
 
 # Drivers
 require("lsm6dsox")
+require("sdcard")
 freeze ("$(OMV_LIB_DIR)/", "ssd1351.py")
 freeze ("$(OMV_LIB_DIR)/", "pca9674a.py")
 freeze ("$(OMV_LIB_DIR)/", "vl53l1x.py")
 freeze ("$(OMV_LIB_DIR)/", "machine.py")
 freeze ("$(OMV_LIB_DIR)/", "display.py")
+freeze ("$(OMV_LIB_DIR)/", "sensor.py")
 
 # Bluetooth
 require("aioble")

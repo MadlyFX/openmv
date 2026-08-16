@@ -43,7 +43,7 @@
 #define HAL_DMA2D_MODULE_ENABLED
 /*#define HAL_DTS_MODULE_ENABLED   */
 /*#define HAL_ETH_MODULE_ENABLED   */
-/*#define HAL_FDCAN_MODULE_ENABLED   */
+#define HAL_FDCAN_MODULE_ENABLED
 #define HAL_GFXMMU_MODULE_ENABLED
 /*#define HAL_GFXTIM_MODULE_ENABLED   */
 /*#define HAL_HASH_MODULE_ENABLED   */
@@ -472,6 +472,8 @@
 #ifdef HAL_XSPI_MODULE_ENABLED
 #include "stm32n6xx_hal_xspi.h"
 #endif /* HAL_XSPI_MODULE_ENABLED */
+
+#include "stm32n6xx_ll_venc.h"
 
 /* Exported macros -----------------------------------------------------------*/
 #ifdef  USE_FULL_ASSERT
