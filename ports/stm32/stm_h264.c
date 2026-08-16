@@ -555,68 +555,6 @@ const char *stm_h264_strerror(int error) {
     }
 }
 
-void *EWLmalloc(u32 n) {
-    return uma_malloc(n, UMA_PERSIST | UMA_MAYBE);
-}
-
-void EWLfree(void *p) {
-    uma_free(p);
-}
-
-void *EWLcalloc(u32 n, u32 s) {
-    size_t size = (size_t) n * (size_t) s;
-    return uma_calloc(size, UMA_PERSIST | UMA_MAYBE);
-}
-
-i32 EWLMallocLinear(const void *instance, u32 size, EWLLinearMem_t *info) {
-    (void) instance;
-
-    if (!info || !size) {
-        return EWL_ERROR;
-    }
-
-    size_t aligned_size = OMV_ALIGN_TO(size, OMV_CACHE_LINE_SIZE);
-    void *ptr = uma_malign(aligned_size, OMV_CACHE_LINE_SIZE, UMA_PERSIST | UMA_CACHE | UMA_MAYBE);
-    if (!ptr) {
-        return EWL_ERROR;
-    }
-
-    memset(ptr, 0, aligned_size);
-    stm_h264_cache_clean(ptr, aligned_size);
-
-    info->size = aligned_size;
-    info->virtualAddress = (u32 *) ptr;
-    info->busAddress = (ptr_t) ptr;
-    return EWL_OK;
-}
-
-void EWLFreeLinear(const void *instance, EWLLinearMem_t *info) {
-    (void) instance;
-
-    if (info && info->virtualAddress) {
-        uma_free(info->virtualAddress);
-        info->virtualAddress = NULL;
-        info->busAddress = 0;
-        info->size = 0;
-    }
-}
-
-void EWLPoolChoiceCb(uint8_t **pool_ptr, size_t *size) {
-    if (pool_ptr) {
-        *pool_ptr = NULL;
-    }
-
-    if (size) {
-        *size = 0;
-    }
-}
-
-void EWLPoolReleaseCb(uint8_t **pool_ptr) {
-    if (pool_ptr) {
-        *pool_ptr = NULL;
-    }
-}
-
 #else
 
 int stm_h264_init(stm_h264_t *ctx, const stm_h264_config_t *config) {

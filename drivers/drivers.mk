@@ -96,63 +96,6 @@ CFLAGS += -I$(TOP_DIR)/drivers/dave2d/include
 $(BUILD)/drivers/dave2d/src/%.o: override CFLAGS += -Wno-unused-value
 endif   # D/AVE 2D / Alif port.
 
-# VC8000 video encoder sources
-ifeq ($(OMV_VC8000_ENABLE), 1)
-DRIVER_SRC_C += $(addprefix vc8000/source/common/, \
-    encasiccontroller.c \
-    encasiccontroller_v2.c \
-    encInputLineBuffer.c \
-    encpreprocess.c \
-    encswhwregisters.c \
-)
-
-DRIVER_SRC_C += $(addprefix vc8000/source/h264/, \
-    H264Cabac.c \
-    H264CodeFrame.c \
-    H264Denoise.c \
-    H264EncApi.c \
-    h264encapi_ext.c \
-    H264Init.c \
-    H264Mad.c \
-    H264NalUnit.c \
-    H264PictureBuffer.c \
-    H264PictureParameterSet.c \
-    H264PutBits.c \
-    H264RateControl.c \
-    H264Sei.c \
-    H264SequenceParameterSet.c \
-    H264Slice.c \
-    H264TestId.c \
-)
-
-DRIVER_SRC_C += $(addprefix vc8000/ewl/, \
-    ewl_impl.c \
-)
-
-CFLAGS += -DOMV_VC8000_ENABLE=1
-CFLAGS += -I$(TOP_DIR)/drivers/vc8000/include
-CFLAGS += -I$(TOP_DIR)/drivers/vc8000/source/common
-CFLAGS += -I$(TOP_DIR)/drivers/vc8000/source/h264
-CFLAGS += -I$(TOP_DIR)/drivers/vc8000/ewl
-
-$(BUILD)/drivers/vc8000/%.o: override CFLAGS += \
-    -Wno-array-bounds \
-    -Wno-cast-align \
-    -Wno-format \
-    -Wno-incompatible-pointer-types \
-    -Wno-int-in-bool-context \
-    -Wno-maybe-uninitialized \
-    -Wno-missing-braces \
-    -Wno-old-style-declaration \
-    -Wno-pointer-sign \
-    -Wno-sign-compare \
-    -Wno-strict-aliasing \
-    -Wno-unused-function \
-    -Wno-unused-parameter \
-    -Wno-unused-but-set-variable \
-    -Wno-unused-variable
-endif   # OMV_VC8000_ENABLE
-
 # Display driver sources
 ifeq ($(MICROPY_PY_DISPLAY), 1)
 DRIVER_SRC_C += $(addprefix display/src/, \
