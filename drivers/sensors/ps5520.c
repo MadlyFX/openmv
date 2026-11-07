@@ -1157,6 +1157,7 @@ static int get_exposure_us(omv_csi_t *csi, int *exposure_us);
 static int update_ltm(omv_csi_t *csi, int agc_gain);
 static int update_ltm_backlight(omv_csi_t *csi, int32_t aec_exposure);
 static int set_ltm_enable(omv_csi_t *csi, bool enable);
+static int restore_ltm_after_mode_change(omv_csi_t *csi);
 
 static int reset(omv_csi_t *csi) {
     ps5520_state_t *ps5520 = csi->priv;
@@ -1303,8 +1304,8 @@ static int set_framesize(omv_csi_t *csi, omv_csi_framesize_t framesize) {
         csi->src_h = SENSOR_HEIGHT;
         ret |= write_registers(csi, sw_reset_regs);
         ret |= write_registers(csi, res_2592x1944_regs);
-        if ((ret == 0) && !((ps5520_state_t *) csi->priv)->ltm_enabled) {
-            ret = set_ltm_enable(csi, false);
+        if (ret == 0) {
+            ret = restore_ltm_after_mode_change(csi);
         }
         return ret;
     }
@@ -1342,8 +1343,8 @@ static int set_framesize(omv_csi_t *csi, omv_csi_framesize_t framesize) {
 
     // Set resolution
     ret |= write_registers(csi, regs);
-    if ((ret == 0) && !((ps5520_state_t *) csi->priv)->ltm_enabled) {
-        ret = set_ltm_enable(csi, false);
+    if (ret == 0) {
+        ret = restore_ltm_after_mode_change(csi);
     }
     return ret;
 }
@@ -1621,12 +1622,13 @@ static int update_ltm(omv_csi_t *csi, int agc_gain) {
         return 0;
     }
 
-    ps5520->ltm_val_cur = ltm_val;
-
     int ret = omv_i2c_write_reg(csi->i2c, csi->slv_addr, REG_BANK, 1, BANK_LTM, 1);
     ret |= omv_i2c_write_reg(csi->i2c, csi->slv_addr, CMD_LTM, 1, ltm_val, 1);
     ret |= omv_i2c_write_reg(csi->i2c, csi->slv_addr, CMD_LTM_UPD, 1, LTM_UPD_EN, 1);
     ret |= omv_i2c_write_reg(csi->i2c, csi->slv_addr, REG_BANK, 1, 0x01, 1);
+    if (ret == 0) {
+        ps5520->ltm_val_cur = ltm_val;
+    }
     return ret;
 }
 
@@ -1665,12 +1667,13 @@ static int update_ltm_backlight(omv_csi_t *csi, int32_t aec_exposure) {
         return 0;
     }
 
-    ps5520->backlight_cur = backlight;
-
     int ret = omv_i2c_write_reg(csi->i2c, csi->slv_addr, REG_BANK, 1, BANK_LTM, 1);
     ret |= omv_i2c_write_reg(csi->i2c, csi->slv_addr, CMD_LTM_BACKLIGHT, 1, backlight, 1);
     ret |= omv_i2c_write_reg(csi->i2c, csi->slv_addr, CMD_LTM_UPD, 1, LTM_UPD_EN, 1);
     ret |= omv_i2c_write_reg(csi->i2c, csi->slv_addr, REG_BANK, 1, 0x01, 1);
+    if (ret == 0) {
+        ps5520->backlight_cur = backlight;
+    }
     return ret;
 }
 
@@ -1704,6 +1707,20 @@ static int set_ltm_enable(omv_csi_t *csi, bool enable) {
     if (ret != 0) {
         ps5520->ltm_enabled = false;
     }
+    return ret;
+}
+
+static int restore_ltm_after_mode_change(omv_csi_t *csi) {
+    ps5520_state_t *ps5520 = csi->priv;
+    if (!ps5520->ltm_enabled) {
+        return set_ltm_enable(csi, false);
+    }
+
+    // Mode tables restore the default register values, invalidating the cache.
+    ps5520->ltm_val_cur = PS5520_LTM_DEFAULT;
+    ps5520->backlight_cur = PS5520_BACKLIGHT_DEFAULT;
+    int ret = update_ltm(csi, ps5520->agc_gain);
+    ret |= update_ltm_backlight(csi, ps5520->aec_exposure);
     return ret;
 }
 
