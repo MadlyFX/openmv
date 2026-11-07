@@ -1,0 +1,30 @@
+name: Contour hardware test build
+on:
+  push:
+    branches: [codex/contour-hardware-ci]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch submodules
+        run: source tools/ci.sh && ci_update_submodules
+      - name: Cache SDK
+        id: sdk-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/openmv-sdk-1.7.3
+          key: openmv-sdk-1.7.3-linux-x86_64
+      - name: Install SDK
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        run: source tools/ci.sh && ci_install_sdk
+      - name: Build N6 firmware
+        run: source tools/ci.sh && ci_build_target OPENMV_N6 false 0 true
+      - name: Upload N6 firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: contour-n6
+          path: OPENMV_N6/
+          if-no-files-found: error
