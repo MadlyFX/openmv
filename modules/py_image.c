@@ -4934,7 +4934,7 @@ static mp_obj_t py_image_load_font(mp_obj_t path_obj) {
 
     int error = 0;
     mp_off_t size = mp_stream_seek(file, 0, MP_SEEK_END, &error);
-    if (error != 0) {
+    if (size == (mp_off_t) -1) {
         mp_stream_close(file);
         mp_raise_OSError(error);
     }
@@ -4949,10 +4949,13 @@ static mp_obj_t py_image_load_font(mp_obj_t path_obj) {
 
     size_t raw_size = (size_t) size;
     uint8_t *raw = m_malloc(raw_size);
-    mp_stream_read_exactly(file, raw, raw_size, &error);
+    size_t bytes_read = mp_stream_read_exactly(file, raw, raw_size, &error);
     mp_stream_close(file);
     if (error != 0) {
         mp_raise_OSError(error);
+    }
+    if (bytes_read != raw_size) {
+        py_font_format_error();
     }
 
     return py_font_from_buffer(raw, raw_size, raw);
