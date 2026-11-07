@@ -5,6 +5,29 @@ on:
 permissions:
   contents: read
 jobs:
+  formatting:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: openmv/uncrustify-action@v1
+        with:
+          config-path: tools/uncrustify.cfg
+          extensions: c,cc,h
+          fail-on-error: false
+          uncrustify-version: '0.75.0'
+      - name: Format changed C files
+        run: |
+          uncrustify -q -c tools/uncrustify.cfg --no-backup lib/imlib/blob.c lib/imlib/imlib.h modules/py_image.c
+          git diff --stat
+      - uses: actions/upload-artifact@v4
+        with:
+          name: contour-formatted-source
+          path: |
+            lib/imlib/blob.c
+            lib/imlib/imlib.h
+            modules/py_image.c
   build:
     runs-on: ubuntu-24.04
     steps:
